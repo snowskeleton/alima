@@ -614,6 +614,7 @@ document.addEventListener('DOMContentLoaded', function() {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.875rem;
+    table-layout: fixed;
 }
 
 .match-table thead {
@@ -632,6 +633,22 @@ document.addEventListener('DOMContentLoaded', function() {
     padding: 1rem 0.75rem;
     border-bottom: 1px solid #f3f4f6;
     vertical-align: top;
+}
+
+/* Column widths */
+.match-table th:nth-child(1),
+.match-table td:nth-child(1) {
+    width: 30%;
+}
+
+.match-table th:nth-child(2),
+.match-table td:nth-child(2) {
+    width: 35%;
+}
+
+.match-table th:nth-child(3),
+.match-table td:nth-child(3) {
+    width: 35%;
 }
 
 .match-table tbody tr {
@@ -782,6 +799,10 @@ document.addEventListener('DOMContentLoaded', function() {
     background: #4b5563;
 }
 
+.manual-selection {
+    min-width: 250px;
+}
+
 .autocomplete-wrapper {
     position: relative;
     margin-bottom: 0.5rem;
@@ -793,6 +814,9 @@ document.addEventListener('DOMContentLoaded', function() {
     border: 1px solid #d1d5db;
     border-radius: 4px;
     font-size: 0.875rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .book-search:focus {
@@ -841,11 +865,13 @@ document.addEventListener('DOMContentLoaded', function() {
     font-weight: 500;
     color: #1f2937;
     margin-bottom: 0.25rem;
+    word-wrap: break-word;
 }
 
 .autocomplete-author {
     font-size: 0.8125rem;
     color: #6b7280;
+    word-wrap: break-word;
 }
 
 .or-label {
