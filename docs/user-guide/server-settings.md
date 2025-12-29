@@ -94,11 +94,18 @@ Changing this setting will take effect on the next server restart.
 
 Audio quality for downloaded audiobooks:
 
-- **Extreme** - Highest quality (recommended)
-- **High** - Good quality, smaller files
-- **Normal** - Lower quality, smallest files
+- **High** - Best quality (recommended)
+- **Normal** - Good quality, smaller files
 
-Default: `Extreme`
+Default: `High`
+
+### Max Concurrent Downloads
+
+Number of audiobooks to download simultaneously.
+
+Default: `3`
+
+Higher values mean faster batch downloads but use more bandwidth and system resources. Recommended range: 1-5.
 
 ### Session Expiration
 

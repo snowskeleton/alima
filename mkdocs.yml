@@ -69,6 +69,7 @@ nav:
   - User Guide:
     - Adding Audible Accounts: user-guide/audible-accounts.md
     - Managing Library: user-guide/library.md
+    - Book Matching: user-guide/book-matching.md
     - Creating RSS Feeds: user-guide/rss-feeds.md
     - User Management: user-guide/users.md
     - Server Settings: user-guide/server-settings.md

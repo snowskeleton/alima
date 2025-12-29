@@ -4,6 +4,36 @@ Audiobook library manager for Audible - Download, organize, and share your audio
 
 ## Quick Start
 
+Choose your preferred installation method:
+
+- **[Docker](#docker-quick-start)** - Recommended for production
+- **[Python/Manual](#manual-installation)** - For development
+
+## Docker Quick Start
+
+The easiest way to run Alima:
+
+```bash
+# 1. Copy environment template
+cp .env.docker .env
+
+# 2. Edit .env and set SECRET_KEY
+# Generate with: openssl rand -hex 32
+nano .env
+
+# 3. Create data directories
+mkdir -p data/{audiobooks/unassigned,covers,audible_auth,temp,db}
+
+# 4. Start the container
+docker compose up -d
+
+# 5. Access at http://localhost:8000
+```
+
+See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete Docker documentation.
+
+## Manual Installation
+
 ### 1. Install Dependencies
 
 ```bash
@@ -128,7 +158,8 @@ Edit `.env` file to configure:
 
 - **Sync** - Can also be configured via web UI
   - `SYNC_INTERVAL_HOURS` - How often to sync with Audible (default: 6)
-  - `DOWNLOAD_QUALITY` - Audio quality: `Extreme`, `High`, or `Normal` (default: `Extreme`)
+  - `DOWNLOAD_QUALITY` - Audio quality: `High` or `Normal` (default: `High`)
+  - `MAX_CONCURRENT_DOWNLOADS` - Number of parallel downloads (default: 3)
 
 - **Session** - Can also be configured via web UI
   - `SESSION_EXPIRE_HOURS` - How long sessions last (default: 168 = 7 days)
@@ -170,6 +201,7 @@ alima2.0/
 ├── data/                    # Data directory (created on first run)
 │   ├── db/                  # SQLite database
 │   ├── audiobooks/          # Downloaded audiobook files
+│   │   └── unassigned/      # Place files here to match to books
 │   ├── covers/              # Cover images
 │   ├── audible_auth/        # Audible authentication files
 │   └── temp/                # Temporary files
@@ -195,6 +227,8 @@ alima2.0/
 ### Audiobook Library
 - Browse and search your audiobooks
 - Automatic metadata and cover download
+- Parallel downloads (configurable concurrency)
+- Book matching - import existing audiobook files
 - Track listening progress
 - Tag and organize books
 

@@ -77,9 +77,15 @@ SMTP_FROM=noreply@yourdomain.com
 # How often to sync with Audible (in hours)
 SYNC_INTERVAL_HOURS=6
 
-# Download quality: Extreme, High, or Normal
-DOWNLOAD_QUALITY=Extreme
+# Download quality: High or Normal
+DOWNLOAD_QUALITY=High
+
+# Number of parallel downloads (default: 3)
+MAX_CONCURRENT_DOWNLOADS=3
 ```
+
+!!! tip "Parallel Downloads"
+    Increasing `MAX_CONCURRENT_DOWNLOADS` speeds up downloading multiple books but uses more bandwidth and system resources. The recommended range is 1-5.
 
 ### Session Settings
 

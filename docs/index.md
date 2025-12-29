@@ -6,10 +6,12 @@ Welcome to Alima 2.0 - your personal audiobook library manager for Audible.
 
 Alima is a self-hosted audiobook library manager that:
 
-- **Downloads your Audible library** - Keep local copies of your audiobooks
+- **Downloads your Audible library** - Keep local copies with parallel downloads
+- **Import existing audiobooks** - Match and organize your existing files
 - **Creates RSS feeds** - Listen in your favorite podcast app
 - **Manages multiple accounts** - Support for multiple Audible accounts
 - **Auto-syncs** - Keeps your library up to date automatically
+- **Docker ready** - Easy deployment with Docker Compose
 - **Secure** - Encrypted credential storage and invite-only registration
 
 ## Quick Links
@@ -22,10 +24,10 @@ Alima is a self-hosted audiobook library manager that:
 ## Features
 
 ### 📚 Library Management
-Browse, search, and organize your audiobook collection with automatic metadata and cover art.
+Browse, search, and organize your audiobook collection with automatic metadata and cover art. Import existing audiobook files with intelligent fuzzy matching.
 
 ### 🔄 Automatic Syncing
-Connects to Audible and automatically syncs your library every 6 hours (configurable).
+Connects to Audible and automatically syncs your library every 6 hours (configurable). Downloads up to 3 books in parallel for faster processing.
 
 ### 📡 RSS Feeds
 Create personal RSS feeds to listen to your audiobooks in any podcast app.

@@ -2,13 +2,83 @@
 
 This guide will help you install and run Alima 2.0 on your system.
 
-## Prerequisites
+Choose your preferred installation method:
+
+- **[Docker](#docker-installation)** - Recommended for production, easiest setup
+- **[Manual/Python](#manual-installation)** - For development or custom setups
+
+## Docker Installation
+
+The recommended way to run Alima in production.
+
+### Prerequisites
+
+- Docker Engine 20.10+
+- Docker Compose V2
+- 2GB+ free disk space (for audiobooks)
+
+### Quick Start
+
+```bash
+# 1. Navigate to the project directory
+cd /path/to/alima2.0
+
+# 2. Copy environment template
+cp .env.docker .env
+
+# 3. Edit .env and set required values
+nano .env
+# Set at minimum:
+# - SECRET_KEY (generate with: openssl rand -hex 32)
+# - DOMAIN (e.g., https://alima.yourdomain.com)
+
+# 4. Create data directories
+mkdir -p data/{audiobooks/unassigned,covers,audible_auth,temp,db}
+
+# 5. Start the container
+docker compose up -d
+
+# 6. View logs
+docker compose logs -f
+
+# 7. Access Alima
+# Navigate to http://localhost:8000
+```
+
+### Docker Management
+
+```bash
+# Stop the service
+docker compose down
+
+# Restart after config changes
+docker compose restart
+
+# Rebuild after code changes
+docker compose up -d --build
+
+# View logs
+docker compose logs -f alima
+```
+
+See [DOCKER_SETUP.md](../../DOCKER_SETUP.md) in the project root for complete Docker documentation including:
+
+- Using with reverse proxies (Caddy/Nginx)
+- Backups
+- Troubleshooting
+- Production recommendations
+
+## Manual Installation
+
+For development or when you prefer to run Alima directly with Python.
+
+### Prerequisites
 
 - Python 3.10 or higher
 - pip (Python package manager)
 - 2GB+ free disk space (for audiobooks)
 
-## Installation Steps
+### Installation Steps
 
 ### 1. Clone or Download
 
