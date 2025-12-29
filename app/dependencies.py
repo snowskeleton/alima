@@ -12,6 +12,18 @@ from .database import get_db
 from .models import User, UserRole
 
 
+class UnauthenticatedException(HTTPException):
+    """Custom exception for unauthenticated users that triggers redirect."""
+
+    def __init__(self, redirect_url: str):
+        super().__init__(
+            status_code=status.HTTP_303_SEE_OTHER,
+            detail="Authentication required",
+            headers={"Location": redirect_url},
+        )
+        self.redirect_url = redirect_url
+
+
 async def get_current_user(
     request: Request,
     session_token: Optional[str] = Cookie(None),
@@ -29,16 +41,13 @@ async def get_current_user(
         Current User object
 
     Raises:
-        RedirectResponse: Redirects to appropriate page if not authenticated
+        UnauthenticatedException: Redirects to appropriate page if not authenticated
     """
     # Check if any users exist in the system
     user_count = db.query(User).count()
     if user_count == 0:
         # No users exist - redirect to registration
-        raise RedirectResponse(
-            url="/auth/register",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        raise UnauthenticatedException(redirect_url="/auth/register")
 
     if not session_token:
         # Not authenticated - redirect to login with next parameter
@@ -46,10 +55,7 @@ async def get_current_user(
         if request.url.query:
             next_url += f"?{request.url.query}"
         encoded_next = quote(next_url, safe="")
-        raise RedirectResponse(
-            url=f"/auth/login?next={encoded_next}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        raise UnauthenticatedException(redirect_url=f"/auth/login?next={encoded_next}")
 
     token_data = verify_token(session_token)
     if token_data is None or token_data.email is None:
@@ -58,10 +64,7 @@ async def get_current_user(
         if request.url.query:
             next_url += f"?{request.url.query}"
         encoded_next = quote(next_url, safe="")
-        raise RedirectResponse(
-            url=f"/auth/login?next={encoded_next}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        raise UnauthenticatedException(redirect_url=f"/auth/login?next={encoded_next}")
 
     user = db.query(User).filter(User.email == token_data.email).first()
     if user is None:
@@ -70,10 +73,7 @@ async def get_current_user(
         if request.url.query:
             next_url += f"?{request.url.query}"
         encoded_next = quote(next_url, safe="")
-        raise RedirectResponse(
-            url=f"/auth/login?next={encoded_next}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        raise UnauthenticatedException(redirect_url=f"/auth/login?next={encoded_next}")
 
     return user
 

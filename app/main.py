@@ -3,7 +3,7 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request, status
 from sqlalchemy.orm import Session
 
 # Configure logging
@@ -111,6 +111,16 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
+
+
+# Exception handler for authentication redirects
+from .dependencies import UnauthenticatedException
+
+
+@app.exception_handler(UnauthenticatedException)
+async def unauthenticated_exception_handler(request: Request, exc: UnauthenticatedException):
+    """Handle authentication exceptions by redirecting to login/register."""
+    return RedirectResponse(url=exc.redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
 # Add session middleware for flash messages
 app.add_middleware(
