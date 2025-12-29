@@ -1,8 +1,10 @@
 """FastAPI dependency injection functions."""
 
 from typing import Optional
+from urllib.parse import quote
 
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from .auth import verify_token
@@ -11,12 +13,15 @@ from .models import User, UserRole
 
 
 async def get_current_user(
-    session_token: Optional[str] = Cookie(None), db: Session = Depends(get_db)
+    request: Request,
+    session_token: Optional[str] = Cookie(None),
+    db: Session = Depends(get_db),
 ) -> User:
     """
     Get the current authenticated user from session token.
 
     Args:
+        request: FastAPI request object
         session_token: JWT token from HTTP-only cookie
         db: Database session
 
@@ -24,24 +29,51 @@ async def get_current_user(
         Current User object
 
     Raises:
-        HTTPException: If not authenticated or token invalid
+        RedirectResponse: Redirects to appropriate page if not authenticated
     """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Not authenticated",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    # Check if any users exist in the system
+    user_count = db.query(User).count()
+    if user_count == 0:
+        # No users exist - redirect to registration
+        raise RedirectResponse(
+            url="/auth/register",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     if not session_token:
-        raise credentials_exception
+        # Not authenticated - redirect to login with next parameter
+        next_url = str(request.url.path)
+        if request.url.query:
+            next_url += f"?{request.url.query}"
+        encoded_next = quote(next_url, safe="")
+        raise RedirectResponse(
+            url=f"/auth/login?next={encoded_next}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     token_data = verify_token(session_token)
     if token_data is None or token_data.email is None:
-        raise credentials_exception
+        # Invalid token - redirect to login
+        next_url = str(request.url.path)
+        if request.url.query:
+            next_url += f"?{request.url.query}"
+        encoded_next = quote(next_url, safe="")
+        raise RedirectResponse(
+            url=f"/auth/login?next={encoded_next}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     user = db.query(User).filter(User.email == token_data.email).first()
     if user is None:
-        raise credentials_exception
+        # User not found - redirect to login
+        next_url = str(request.url.path)
+        if request.url.query:
+            next_url += f"?{request.url.query}"
+        encoded_next = quote(next_url, safe="")
+        raise RedirectResponse(
+            url=f"/auth/login?next={encoded_next}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     return user
 

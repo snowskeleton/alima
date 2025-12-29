@@ -3,7 +3,8 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from sqlalchemy.orm import Session
 
 # Configure logging
 logging.basicConfig(
@@ -22,7 +23,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import settings
-from .database import init_db
+from .database import get_db, init_db
 
 
 class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
@@ -142,12 +143,21 @@ async def health_check():
 
 
 @app.get("/", tags=["Root"])
-async def root():
+async def root(db: Session = Depends(get_db)):
     """
     Root endpoint.
 
-    Redirects to the library page.
+    Redirects to appropriate page based on system state.
     """
+    from .models import User
+
+    # Check if any users exist
+    user_count = db.query(User).count()
+    if user_count == 0:
+        # No users - redirect to registration
+        return RedirectResponse(url="/auth/register", status_code=303)
+
+    # Users exist - redirect to login/library
     return RedirectResponse(url="/library", status_code=303)
 
 

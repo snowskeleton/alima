@@ -23,13 +23,102 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 templates = Jinja2Templates(directory="app/templates")
 
 
+@router.get("/register", response_class=HTMLResponse)
+async def register_page(
+    request: Request,
+    current_user: User = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+):
+    """Display registration page (only available if no users exist)."""
+    from ..utils.flash import get_flashed_messages
+
+    # Check if any users exist
+    user_count = db.query(User).count()
+
+    # Redirect if already logged in
+    if current_user:
+        return RedirectResponse(url="/library", status_code=status.HTTP_303_SEE_OTHER)
+
+    # If users exist, registration is not allowed (must use invites)
+    if user_count > 0:
+        return RedirectResponse(url="/auth/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="auth/register.html",
+        context={
+            "messages": get_flashed_messages(request),
+        },
+    )
+
+
+@router.post("/register")
+async def register(
+    request: Request,
+    response: Response,
+    email: str = Form(...),
+    password: str = Form(...),
+    password_confirm: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Process registration form (creates first admin user)."""
+    from ..utils.flash import flash
+
+    # Check if any users exist
+    user_count = db.query(User).count()
+
+    # If users exist, registration is not allowed
+    if user_count > 0:
+        flash(request, "Registration is not available. Please request an invite from an admin.", "error")
+        return RedirectResponse(
+            url="/auth/login",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    # Validate passwords match
+    if password != password_confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passwords do not match",
+        )
+
+    # Create first user as admin
+    user = create_user(db, email, password, role="admin")
+
+    # Create session token
+    token = create_access_token(data={"sub": user.email, "user_id": user.id})
+
+    # Set HTTP-only cookie and redirect
+    redirect_response = RedirectResponse(
+        url="/library", status_code=status.HTTP_303_SEE_OTHER
+    )
+    redirect_response.set_cookie(
+        key="session_token",
+        value=token,
+        httponly=True,
+        max_age=settings.session_expire_hours * 3600,
+        samesite="lax",
+    )
+
+    return redirect_response
+
+
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(
     request: Request,
     next: str = Query(None),
     current_user: User = Depends(get_optional_user),
+    db: Session = Depends(get_db),
 ):
     """Display login page."""
+    from ..utils.flash import get_flashed_messages
+
+    # Check if any users exist
+    user_count = db.query(User).count()
+    if user_count == 0:
+        # No users - redirect to registration
+        return RedirectResponse(url="/auth/register", status_code=status.HTTP_303_SEE_OTHER)
+
     # Redirect if already logged in
     if current_user:
         return RedirectResponse(url="/library", status_code=status.HTTP_303_SEE_OTHER)
@@ -37,7 +126,10 @@ async def login_page(
     return templates.TemplateResponse(
         request=request,
         name="auth/login.html",
-        context={"next": next},
+        context={
+            "next": next,
+            "messages": get_flashed_messages(request),
+        },
     )
 
 
