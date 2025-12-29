@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import SessionLocal
-from ..models import AudibleAccount, Book, DownloadQueue, DownloadStatus
+from ..models import AudibleAccount, Book, DownloadQueue, DownloadStatus, DownloadType
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,7 @@ class BookDownloadService:
 
     def _download_book_thread_safe(self, queue_entry_id: int) -> dict:
         """
-        Thread-safe wrapper for downloading a book.
+        Thread-safe wrapper for downloading a book or cover.
         Creates its own database session for thread safety.
 
         Args:
@@ -141,8 +141,11 @@ class BookDownloadService:
             # Create a temporary service instance with this thread's DB session
             temp_service = BookDownloadService(db)
 
-            # Download the book
-            temp_service._download_book(queue_entry)
+            # Download based on type
+            if queue_entry.download_type == DownloadType.COVER:
+                temp_service._download_cover(queue_entry)
+            else:
+                temp_service._download_book(queue_entry)
 
             return {"success": True}
 
@@ -373,6 +376,139 @@ class BookDownloadService:
 
             raise
 
+    def _download_cover(self, queue_entry: DownloadQueue) -> None:
+        """
+        Download cover image for a book.
+
+        Args:
+            queue_entry: DownloadQueue entry to process
+        """
+        # Update status
+        queue_entry.status = DownloadStatus.DOWNLOADING
+        queue_entry.started_at = datetime.datetime.now(datetime.timezone.utc)
+        queue_entry.attempts += 1
+        self.db.commit()
+
+        try:
+            # Get book and account
+            book = (
+                self.db.query(Book).filter(Book.id == queue_entry.book_id).first()
+            )
+            account = (
+                self.db.query(AudibleAccount)
+                .filter(AudibleAccount.id == queue_entry.audible_account_id)
+                .first()
+            )
+
+            if not book or not account:
+                raise Exception("Book or account not found")
+
+            # Skip if book already has a cover
+            if book.cover_image_path:
+                logger.info(f"Book '{book.title}' already has cover, skipping")
+                queue_entry.status = DownloadStatus.COMPLETED
+                queue_entry.completed_at = datetime.datetime.now(datetime.timezone.utc)
+                self.db.commit()
+                return
+
+            logger.info(f"Downloading cover for '{book.title}' (ASIN: {queue_entry.asin})")
+
+            # Load authenticator
+            auth_file = settings.audible_auth_path / account.auth_file_path
+            auth = audible.Authenticator.from_file(str(auth_file))
+            client = audible.Client(auth)
+
+            # Fetch book metadata to get cover URL
+            # We need to get the product_images from the library item
+            library = client.get(
+                "1.0/library",
+                params={
+                    "response_groups": "product_attrs",
+                    "num_results": 1,
+                    "asin": queue_entry.asin,
+                },
+            )
+
+            items = library.get("items") or []
+            if not items:
+                raise ValueError(f"Book with ASIN {queue_entry.asin} not found in library")
+
+            item = items[0]
+            product_images = item.get("product_images")
+            if not product_images:
+                raise ValueError(f"No product images found for {book.title}")
+
+            # Try to get 500px image (standard size)
+            image_url = product_images.get("500")
+            if not image_url:
+                # Fallback to any available size
+                image_url = next(iter(product_images.values()), None)
+
+            if not image_url:
+                raise ValueError(f"No image URL found for {book.title}")
+
+            logger.info(f"Cover URL: {image_url[:100]}...")
+
+            # Ensure covers directory exists
+            settings.covers_path.mkdir(parents=True, exist_ok=True)
+
+            # Download image
+            response = httpx.get(image_url, follow_redirects=True, timeout=30.0)
+            response.raise_for_status()
+
+            # Determine file extension from content type
+            content_type = response.headers.get("content-type", "")
+            ext = ".jpg"  # Default to jpg
+            if "png" in content_type:
+                ext = ".png"
+            elif "webp" in content_type:
+                ext = ".webp"
+
+            # Generate filename using ASIN
+            cover_filename = f"{book.asin}{ext}"
+            cover_path = settings.covers_path / cover_filename
+
+            # Save image
+            with open(cover_path, "wb") as f:
+                f.write(response.content)
+
+            # Update book record with relative path
+            book.cover_image_path = f"covers/{cover_filename}"
+
+            # Mark as completed
+            queue_entry.status = DownloadStatus.COMPLETED
+            queue_entry.completed_at = datetime.datetime.now(datetime.timezone.utc)
+
+            # Calculate download metrics
+            queue_entry.file_size_bytes = len(response.content)
+            if queue_entry.started_at and queue_entry.completed_at:
+                start = queue_entry.started_at
+                end = queue_entry.completed_at
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=datetime.timezone.utc)
+                if end.tzinfo is None:
+                    end = end.replace(tzinfo=datetime.timezone.utc)
+
+                duration = (end - start).total_seconds()
+                queue_entry.duration_seconds = int(duration)
+                if duration > 0:
+                    speed_kbps = (len(response.content) / 1024) / duration
+                    queue_entry.download_speed_kbps = int(speed_kbps)
+
+            self.db.commit()
+
+            logger.info(f"Successfully downloaded cover for {book.title}: {cover_filename}")
+
+        except Exception as e:
+            logger.error(f"Error downloading cover for {queue_entry.asin}: {e}", exc_info=True)
+
+            # Update queue entry with error
+            queue_entry.status = DownloadStatus.FAILED
+            queue_entry.error_message = str(e)[:500]  # Truncate long errors
+            self.db.commit()
+
+            raise
+
     def _download_file(self, url: str, output_path: Path, audible_client=None) -> None:
         """
         Download a file from URL to local path.
@@ -501,6 +637,7 @@ class BookDownloadService:
                 book_id=book_id,
                 audible_account_id=book.audible_account_id,
                 asin=book.asin,
+                download_type=DownloadType.BOOK,
                 priority=999,  # High priority for manual downloads
                 status=DownloadStatus.PENDING,
                 attempts=0,

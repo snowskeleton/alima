@@ -76,7 +76,7 @@
     <div class="books-grid">
         {% for book in books %}
         <div class="book-card">
-            <div class="book-cover">
+            <a href="/library/{{ book.id }}" class="book-cover">
                 {% if book.cover_image_path %}
                 <img src="/files/covers/{{ book.cover_image_path.split('/')[-1] }}" alt="{{ book.title }}" />
                 {% else %}
@@ -84,7 +84,7 @@
                     <span>📖</span>
                 </div>
                 {% endif %}
-            </div>
+            </a>
             <div class="book-info">
                 <h3 class="book-title">
                     <a href="/library/{{ book.id }}">{{ book.title }}</a>
@@ -129,7 +129,7 @@
     <div class="books-list">
         {% for book in books %}
         <div class="book-list-item">
-            <div class="book-list-cover">
+            <a href="/library/{{ book.id }}" class="book-list-cover">
                 {% if book.cover_image_path %}
                 <img src="/files/covers/{{ book.cover_image_path.split('/')[-1] }}" alt="{{ book.title }}" />
                 {% else %}
@@ -137,7 +137,7 @@
                     <span>📖</span>
                 </div>
                 {% endif %}
-            </div>
+            </a>
             <div class="book-list-info">
                 <h3 class="book-list-title">
                     <a href="/library/{{ book.id }}">{{ book.title }}</a>
@@ -360,10 +360,13 @@ document.querySelectorAll('input[type="text"]').forEach(input => {
 }
 
 .book-cover {
+    display: block;
     width: 100%;
     aspect-ratio: 2/3;
     background: var(--border-color);
     overflow: hidden;
+    text-decoration: none;
+    cursor: pointer;
 }
 
 .book-cover img {
@@ -442,12 +445,15 @@ document.querySelectorAll('input[type="text"]').forEach(input => {
 }
 
 .book-list-cover {
+    display: block;
     width: 80px;
     height: 120px;
     flex-shrink: 0;
     border-radius: 4px;
     overflow: hidden;
     background: var(--border-color);
+    text-decoration: none;
+    cursor: pointer;
 }
 
 .book-list-cover img {

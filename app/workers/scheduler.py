@@ -14,18 +14,59 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
 
+def quick_sync_all_libraries():
+    """Periodic task to quick sync all Audible libraries (checks for new books only)."""
+    from ..services.audible_sync import AudibleSyncService
+    from ..models import AudibleAccount
+
+    logger.info("Starting scheduled quick sync")
+    db = SessionLocal()
+    try:
+        sync_service = AudibleSyncService(db)
+        accounts = db.query(AudibleAccount).filter(AudibleAccount.enabled == True).all()
+
+        overall_stats = {
+            "accounts_synced": 0,
+            "accounts_failed": 0,
+            "total_books": 0,
+            "new_books": 0,
+            "updated_books": 0,
+            "queued_downloads": 0,
+            "covers_queued": 0,
+        }
+
+        for account in accounts:
+            try:
+                stats = sync_service.quick_sync_account(account)
+                overall_stats["accounts_synced"] += 1
+                overall_stats["total_books"] += stats["total"]
+                overall_stats["new_books"] += stats["new"]
+                overall_stats["updated_books"] += stats["updated"]
+                overall_stats["queued_downloads"] += stats["queued"]
+                overall_stats["covers_queued"] += stats["covers_queued"]
+            except Exception as e:
+                logger.error(f"Failed to quick sync account {account.username}: {e}")
+                overall_stats["accounts_failed"] += 1
+
+        logger.info(f"Scheduled quick sync completed: {overall_stats}")
+    except Exception as e:
+        logger.error(f"Error in scheduled quick sync: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
 def sync_all_libraries():
-    """Periodic task to sync all Audible libraries."""
+    """Periodic task to fully sync all Audible libraries (full library refresh)."""
     from ..services.audible_sync import AudibleSyncService
 
-    logger.info("Starting scheduled library sync")
+    logger.info("Starting scheduled full library sync")
     db = SessionLocal()
     try:
         sync_service = AudibleSyncService(db)
         stats = sync_service.sync_all_accounts()
-        logger.info(f"Scheduled sync completed: {stats}")
+        logger.info(f"Scheduled full sync completed: {stats}")
     except Exception as e:
-        logger.error(f"Error in scheduled sync: {e}", exc_info=True)
+        logger.error(f"Error in scheduled full sync: {e}", exc_info=True)
     finally:
         db.close()
 
@@ -54,28 +95,47 @@ def start_scheduler():
         logger.warning("Scheduler is already running")
         return
 
-    # Get sync interval from database settings (with hardcoded default)
-    sync_interval_hours = 6  # Default: 6 hours
+    # Get sync intervals from database settings (with hardcoded defaults)
+    quick_sync_interval_seconds = 60  # Default: 60 seconds
+    full_sync_interval_hours = 24  # Default: 24 hours (daily)
     try:
         from ..services.settings_service import SettingsService
         db = SessionLocal()
         settings_service = SettingsService(db)
-        db_interval = settings_service.get("sync_interval_hours")
-        if db_interval:
-            sync_interval_hours = int(db_interval)
+
+        # Quick sync interval (for checking new books)
+        db_quick_interval = settings_service.get("quick_sync_interval_seconds")
+        if db_quick_interval:
+            quick_sync_interval_seconds = int(db_quick_interval)
+
+        # Full sync interval (for complete library refresh)
+        db_full_interval = settings_service.get("full_sync_interval_hours")
+        if db_full_interval:
+            full_sync_interval_hours = int(db_full_interval)
+
         db.close()
     except Exception as e:
-        logger.warning(f"Failed to load sync interval from database, using default: {e}")
+        logger.warning(f"Failed to load sync intervals from database, using defaults: {e}")
 
-    # Add library sync job (runs every N hours based on settings)
+    # Add quick sync job (runs frequently to check for new books)
     scheduler.add_job(
-        sync_all_libraries,
-        trigger=IntervalTrigger(hours=sync_interval_hours),
-        id="sync_libraries",
-        name="Sync all Audible libraries",
+        quick_sync_all_libraries,
+        trigger=IntervalTrigger(seconds=quick_sync_interval_seconds),
+        id="quick_sync_libraries",
+        name="Quick sync Audible libraries (new books only)",
         replace_existing=True,
     )
-    logger.info(f"Scheduled library sync to run every {sync_interval_hours} hours")
+    logger.info(f"Scheduled quick sync to run every {quick_sync_interval_seconds} seconds")
+
+    # Add full library sync job (runs less frequently for complete refresh)
+    scheduler.add_job(
+        sync_all_libraries,
+        trigger=IntervalTrigger(hours=full_sync_interval_hours),
+        id="full_sync_libraries",
+        name="Full sync all Audible libraries",
+        replace_existing=True,
+    )
+    logger.info(f"Scheduled full sync to run every {full_sync_interval_hours} hours")
 
     # Add download queue processing job (runs every 30 seconds for active processing)
     scheduler.add_job(

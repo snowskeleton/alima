@@ -65,6 +65,13 @@ class DownloadStatus(str, PyEnum):
     FAILED = "failed"
 
 
+class DownloadType(str, PyEnum):
+    """Download type enumeration."""
+
+    BOOK = "book"
+    COVER = "cover"
+
+
 class ReplicationMode(str, PyEnum):
     """Replication mode enumeration."""
 
@@ -302,6 +309,9 @@ class DownloadQueue(Base):
         Integer, ForeignKey("audible_accounts.id")
     )
     asin: Mapped[str] = mapped_column(String(32))
+    download_type: Mapped[DownloadType] = mapped_column(
+        Enum(DownloadType), default=DownloadType.BOOK
+    )
     priority: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[DownloadStatus] = mapped_column(
         Enum(DownloadStatus), default=DownloadStatus.PENDING

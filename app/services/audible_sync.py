@@ -9,7 +9,15 @@ import httpx
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import AudibleAccount, Book, BookSource, DownloadQueue, DownloadStatus, MetadataSource
+from ..models import (
+    AudibleAccount,
+    Book,
+    BookSource,
+    DownloadQueue,
+    DownloadStatus,
+    DownloadType,
+    MetadataSource,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +28,122 @@ class AudibleSyncService:
     def __init__(self, db: Session):
         """Initialize sync service."""
         self.db = db
+
+    def quick_sync_account(self, account: AudibleAccount) -> dict:
+        """
+        Quick sync library for a single Audible account using purchased_after.
+
+        This method only fetches books purchased since the last sync,
+        making it much faster than a full sync.
+
+        Args:
+            account: AudibleAccount to sync
+
+        Returns:
+            Dictionary with sync statistics
+        """
+        logger.info(f"Starting quick sync for account: {account.username}")
+
+        try:
+            # Load authenticator from file
+            auth_file = settings.audible_auth_path / account.auth_file_path
+            if not auth_file.exists():
+                raise FileNotFoundError(f"Auth file not found: {auth_file}")
+
+            auth = audible.Authenticator.from_file(str(auth_file))
+            client = audible.Client(auth)
+
+            # Build params for quick sync
+            params = {
+                "response_groups": "contributors, media, product_desc, series, product_extended_attrs, product_attrs",
+                "num_results": 999,
+                "page": 1,
+            }
+
+            # Add purchased_after filter if we have a last sync timestamp
+            if account.last_sync_timestamp:
+                # Format as RFC3339: 2025-01-01T00:00:00Z
+                purchased_after = account.last_sync_timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+                params["purchased_after"] = purchased_after
+                logger.info(f"Fetching books purchased after {purchased_after}")
+
+            # Fetch library from Audible
+            library = client.get("1.0/library", params=params)
+
+            if library is None:
+                raise ValueError("Failed to fetch library from Audible API")
+
+            items = library.get("items") or []
+            logger.info(f"Found {len(items)} new/updated books in library")
+
+            stats = {
+                "total": len(items),
+                "new": 0,
+                "updated": 0,
+                "queued": 0,
+                "covers_queued": 0,
+            }
+
+            # Process items using the same logic as full sync
+            for item in items:
+                asin = item.get("asin")
+                if not asin:
+                    continue
+
+                # Check if book already exists
+                existing_book = (
+                    self.db.query(Book).filter(Book.asin == asin).first()
+                )
+
+                if existing_book:
+                    # Update metadata if changed
+                    if self._update_book_metadata(existing_book, item, account):
+                        stats["updated"] += 1
+                    # Queue cover download if missing
+                    if not existing_book.cover_image_path:
+                        self._queue_cover_download(existing_book, account)
+                        stats["covers_queued"] += 1
+                else:
+                    # Create new book entry
+                    book = self._create_book_from_item(item, account)
+                    self.db.add(book)
+                    self.db.flush()  # Get book ID
+                    # Queue cover download
+                    self._queue_cover_download(book, account)
+                    stats["new"] += 1
+                    stats["covers_queued"] += 1
+
+                    # Add to download queue if not already downloaded and downloads are enabled
+                    if not book.file_path and account.downloads_enabled and book.download_enabled:
+                        queue_entry = DownloadQueue(
+                            book_id=book.id,
+                            audible_account_id=account.id,
+                            asin=asin,
+                            download_type=DownloadType.BOOK,
+                            priority=0,
+                            status=DownloadStatus.PENDING,
+                            attempts=0,
+                        )
+                        self.db.add(queue_entry)
+                        stats["queued"] += 1
+
+            # Update last sync timestamp
+            account.last_sync_timestamp = datetime.utcnow()
+            self.db.commit()
+
+            logger.info(
+                f"Quick sync complete for {account.username}: "
+                f"{stats['new']} new, {stats['updated']} updated, "
+                f"{stats['queued']} queued for download, "
+                f"{stats['covers_queued']} covers queued"
+            )
+
+            return stats
+
+        except Exception as e:
+            logger.error(f"Error in quick sync for account {account.username}: {e}")
+            self.db.rollback()
+            raise
 
     def sync_account(self, account: AudibleAccount) -> dict:
         """
@@ -63,6 +187,7 @@ class AudibleSyncService:
                 "new": 0,
                 "updated": 0,
                 "queued": 0,
+                "covers_queued": 0,
             }
 
             for item in items:
@@ -79,17 +204,19 @@ class AudibleSyncService:
                     # Update metadata if changed
                     if self._update_book_metadata(existing_book, item, account):
                         stats["updated"] += 1
-                    # Download cover if missing
+                    # Queue cover download if missing
                     if not existing_book.cover_image_path:
-                        self._download_cover_image(existing_book, item)
+                        self._queue_cover_download(existing_book, account)
+                        stats["covers_queued"] += 1
                 else:
                     # Create new book entry
                     book = self._create_book_from_item(item, account)
                     self.db.add(book)
                     self.db.flush()  # Get book ID
-                    # Download cover image
-                    self._download_cover_image(book, item)
+                    # Queue cover download
+                    self._queue_cover_download(book, account)
                     stats["new"] += 1
+                    stats["covers_queued"] += 1
 
                     # Add to download queue if not already downloaded and downloads are enabled
                     # Check both account-level and book-level download flags
@@ -98,6 +225,7 @@ class AudibleSyncService:
                             book_id=book.id,
                             audible_account_id=account.id,
                             asin=asin,
+                            download_type=DownloadType.BOOK,
                             priority=0,
                             status=DownloadStatus.PENDING,
                             attempts=0,
@@ -275,57 +403,42 @@ class AudibleSyncService:
 
         return updated
 
-    def _download_cover_image(self, book: Book, item: dict) -> None:
+    def _queue_cover_download(self, book: Book, account: AudibleAccount) -> None:
         """
-        Download cover image from Audible API.
+        Queue cover image for download.
 
         Args:
-            book: Book model to update with cover image path
-            item: Book data from Audible API
+            book: Book model to download cover for
+            account: AudibleAccount for this book
         """
         try:
-            # Get product images from API response
-            product_images = item.get("product_images")
-            if not product_images:
-                logger.debug(f"No product images found for {book.title}")
+            # Check if already queued
+            existing_queue = (
+                self.db.query(DownloadQueue)
+                .filter(
+                    DownloadQueue.book_id == book.id,
+                    DownloadQueue.download_type == DownloadType.COVER,
+                    DownloadQueue.status.in_([DownloadStatus.PENDING, DownloadStatus.DOWNLOADING])
+                )
+                .first()
+            )
+
+            if existing_queue:
+                logger.debug(f"Cover for {book.title} already queued")
                 return
 
-            # Try to get 500px image (standard size)
-            image_url = product_images.get("500")
-            if not image_url:
-                # Fallback to any available size
-                image_url = next(iter(product_images.values()), None)
-
-            if not image_url:
-                logger.debug(f"No image URL found for {book.title}")
-                return
-
-            # Ensure covers directory exists
-            settings.covers_path.mkdir(parents=True, exist_ok=True)
-
-            # Download image
-            response = httpx.get(image_url, follow_redirects=True, timeout=30.0)
-            response.raise_for_status()
-
-            # Determine file extension from content type
-            content_type = response.headers.get("content-type", "")
-            ext = ".jpg"  # Default to jpg
-            if "png" in content_type:
-                ext = ".png"
-            elif "webp" in content_type:
-                ext = ".webp"
-
-            # Generate filename using ASIN
-            cover_filename = f"{book.asin}{ext}"
-            cover_path = settings.covers_path / cover_filename
-
-            # Save image
-            with open(cover_path, "wb") as f:
-                f.write(response.content)
-
-            # Update book record with relative path
-            book.cover_image_path = f"covers/{cover_filename}"
-            logger.info(f"Downloaded cover for {book.title}: {cover_filename}")
+            # Queue the cover download
+            queue_entry = DownloadQueue(
+                book_id=book.id,
+                audible_account_id=account.id,
+                asin=book.asin,
+                download_type=DownloadType.COVER,
+                priority=100,  # Higher priority than books for better UX
+                status=DownloadStatus.PENDING,
+                attempts=0,
+            )
+            self.db.add(queue_entry)
+            logger.debug(f"Queued cover download for {book.title}")
 
         except Exception as e:
-            logger.error(f"Failed to download cover for {book.title}: {e}")
+            logger.error(f"Failed to queue cover download for {book.title}: {e}")
