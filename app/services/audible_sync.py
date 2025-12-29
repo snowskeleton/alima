@@ -349,6 +349,13 @@ class AudibleSyncService:
                 if name and name not in genres_list:
                     genres_list.append(name)
 
+        # Extract cover URL
+        cover_url = None
+        product_images = item.get("product_images")
+        if product_images:
+            # Try to get 500px image (standard size), fallback to any available
+            cover_url = product_images.get("500") or next(iter(product_images.values()), None)
+
         book = Book(
             asin=item.get("asin"),
             audible_account_id=account.id,
@@ -363,6 +370,7 @@ class AudibleSyncService:
             publisher=publisher,
             publish_date=publish_date,
             duration_seconds=duration_seconds,
+            cover_url=cover_url,
             genres=genres_list if genres_list else None,
             metadata_source=MetadataSource.AUDIBLE,
             synced_from_master=False,
@@ -395,6 +403,14 @@ class AudibleSyncService:
         if book.title != new_title:
             book.title = new_title
             updated = True
+
+        # Update cover URL if available and different
+        product_images = item.get("product_images")
+        if product_images:
+            new_cover_url = product_images.get("500") or next(iter(product_images.values()), None)
+            if new_cover_url and book.cover_url != new_cover_url:
+                book.cover_url = new_cover_url
+                updated = True
 
         # Update last_metadata_update if changed
         if updated:

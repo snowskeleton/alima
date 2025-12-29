@@ -413,39 +413,53 @@ class BookDownloadService:
 
             logger.info(f"Downloading cover for '{book.title}' (ASIN: {queue_entry.asin})")
 
-            # Load authenticator
-            auth_file = settings.audible_auth_path / account.auth_file_path
-            auth = audible.Authenticator.from_file(str(auth_file))
-            client = audible.Client(auth)
+            # Use the stored cover URL from database (set during sync)
+            image_url = book.cover_url
 
-            # Fetch book metadata to get cover URL
-            # We need to get the product_images from the library item
-            library = client.get(
-                "1.0/library",
-                params={
-                    "response_groups": "product_attrs",
-                    "num_results": 1,
-                    "asin": queue_entry.asin,
-                },
-            )
-
-            items = library.get("items") or []
-            if not items:
-                raise ValueError(f"Book with ASIN {queue_entry.asin} not found in library")
-
-            item = items[0]
-            product_images = item.get("product_images")
-            if not product_images:
-                raise ValueError(f"No product images found for {book.title}")
-
-            # Try to get 500px image (standard size)
-            image_url = product_images.get("500")
+            # If no URL stored, fetch it from Audible and update the book
             if not image_url:
-                # Fallback to any available size
-                image_url = next(iter(product_images.values()), None)
+                logger.info(f"No cover URL stored for {book.title}, fetching from Audible...")
 
-            if not image_url:
-                raise ValueError(f"No image URL found for {book.title}")
+                # Load authenticator and fetch library
+                auth_file = settings.audible_auth_path / account.auth_file_path
+                auth = audible.Authenticator.from_file(str(auth_file))
+                client = audible.Client(auth)
+
+                library = client.get(
+                    "library",
+                    params={
+                        "response_groups": "contributors, media, product_desc, series, product_extended_attrs, product_attrs",
+                        "num_results": 999,
+                        "page": 1,
+                    },
+                )
+
+                items = library.get("items") or []
+                if not items:
+                    raise ValueError(f"Book with ASIN {queue_entry.asin} not found in library")
+
+                # Find the specific book by ASIN
+                item = None
+                for lib_item in items:
+                    if lib_item.get("asin") == queue_entry.asin:
+                        item = lib_item
+                        break
+
+                if not item:
+                    raise ValueError(f"Book with ASIN {queue_entry.asin} not found in library")
+
+                # Extract cover URL
+                product_images = item.get("product_images")
+                if product_images:
+                    image_url = product_images.get("500") or next(iter(product_images.values()), None)
+
+                if not image_url:
+                    raise ValueError(f"No product images found for {book.title}")
+
+                # Store the URL for future use
+                book.cover_url = image_url
+                self.db.commit()
+                logger.info(f"Stored cover URL for {book.title}")
 
             logger.info(f"Cover URL: {image_url[:100]}...")
 

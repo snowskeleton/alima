@@ -80,6 +80,7 @@
     <div class="bulk-actions">
         <button type="button" class="btn-action" onclick="markSelectedAsRead()">Mark Read</button>
         <button type="button" class="btn-action" onclick="markSelectedAsUnread()">Mark Unread</button>
+        <button type="button" class="btn-action btn-danger" onclick="removeSelected()">Remove Selected</button>
         <form action="/admin/downloads/process-queue" method="POST" style="display: inline;">
             <button type="submit" class="btn-action">Process Queue</button>
         </form>
@@ -247,6 +248,31 @@ function markSelectedAsUnread() {
     document.body.appendChild(form);
     form.submit();
 }
+
+function removeSelected() {
+    const ids = getSelectedIds();
+    if (ids.length === 0) {
+        alert('No entries selected');
+        return;
+    }
+
+    if (!confirm(`Are you sure you want to remove ${ids.length} entries from the queue?`)) {
+        return;
+    }
+
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/admin/downloads/bulk-remove';
+
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'entry_ids';
+    input.value = ids.join(',');
+
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+}
 </script>
 
 <style>
@@ -351,6 +377,15 @@ function markSelectedAsUnread() {
 
 .btn-action:hover {
     background: #f9fafb;
+}
+
+.btn-action.btn-danger {
+    border-color: #ef4444;
+    color: #dc2626;
+}
+
+.btn-action.btn-danger:hover {
+    background: #fef2f2;
 }
 
 /* Table - minimal and clean */

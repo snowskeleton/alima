@@ -215,6 +215,7 @@ class Book(Base):
     publish_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     cover_image_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    cover_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     genres: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # Metadata tracking

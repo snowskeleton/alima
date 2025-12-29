@@ -285,6 +285,32 @@ async def bulk_mark_unread(
     return RedirectResponse(url=referer, status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.post("/bulk-remove")
+async def bulk_remove(
+    request: Request,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Remove selected entries from the download queue."""
+    # Get form data
+    form_data = await request.form()
+    entry_ids_str = form_data.get("entry_ids", "")
+
+    if not entry_ids_str:
+        return RedirectResponse(url="/admin/downloads", status_code=status.HTTP_303_SEE_OTHER)
+
+    # Parse entry IDs
+    entry_ids = [int(id.strip()) for id in entry_ids_str.split(",") if id.strip()]
+
+    # Delete entries
+    db.query(DownloadQueue).filter(DownloadQueue.id.in_(entry_ids)).delete(synchronize_session=False)
+    db.commit()
+
+    # Redirect back with referer or default
+    referer = request.headers.get("referer", "/admin/downloads")
+    return RedirectResponse(url=referer, status_code=status.HTTP_303_SEE_OTHER)
+
+
 @router.post("/process-queue")
 async def process_queue(
     current_user: User = Depends(require_admin),

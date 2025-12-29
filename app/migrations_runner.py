@@ -124,6 +124,65 @@ def run_migration_008_add_download_type(db: Session, engine) -> None:
         raise
 
 
+def run_migration_009_add_cover_url(db: Session, engine) -> None:
+    """Add cover_url column to books table."""
+    migration_name = "009_add_cover_url"
+
+    is_postgres = "postgresql" in str(engine.url)
+
+    # Check if column actually exists
+    column_exists = False
+    if is_postgres:
+        result = db.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name='books' AND column_name='cover_url'
+        """))
+        column_exists = result.fetchone() is not None
+    else:
+        result = db.execute(text("PRAGMA table_info(books)"))
+        columns = [col[1] for col in result.fetchall()]
+        column_exists = "cover_url" in columns
+
+    if column_exists:
+        logger.info(f"Column cover_url already exists, ensuring migration is marked as applied")
+        if not has_migration_been_applied(db, migration_name):
+            mark_migration_applied(db, migration_name)
+        return
+
+    if has_migration_been_applied(db, migration_name):
+        logger.warning(f"Migration {migration_name} was marked as applied but column doesn't exist - re-running")
+        db.execute(
+            text("DELETE FROM schema_migrations WHERE migration_name = :name"),
+            {"name": migration_name}
+        )
+        db.commit()
+
+    logger.info(f"Running migration: {migration_name}")
+
+    try:
+        logger.info("Adding cover_url column to books table...")
+        if is_postgres:
+            db.execute(text("""
+                ALTER TABLE books
+                ADD COLUMN cover_url VARCHAR(1024)
+            """))
+        else:
+            db.execute(text("""
+                ALTER TABLE books
+                ADD COLUMN cover_url VARCHAR(1024)
+            """))
+
+        db.commit()
+        mark_migration_applied(db, migration_name)
+        logger.info(f"Migration {migration_name} completed successfully!")
+
+    except Exception as e:
+        logger.error(f"Migration {migration_name} failed: {e}", exc_info=True)
+        db.rollback()
+        raise
+
+
 def run_all_pending_migrations(db: Session) -> None:
     """Run all pending migrations in order."""
     from .database import engine
@@ -136,6 +195,7 @@ def run_all_pending_migrations(db: Session) -> None:
     # List of migrations in order
     migrations = [
         run_migration_008_add_download_type,
+        run_migration_009_add_cover_url,
     ]
 
     for migration_func in migrations:
