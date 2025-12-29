@@ -97,6 +97,11 @@
                             Sync Now
                         </button>
                     </form>
+                    <form action="/admin/accounts/{{ account.id }}/queue-all" method="POST" style="display: inline;">
+                        <button type="submit" class="btn btn-sm btn-info" {% if not account.enabled %}disabled{% endif %} title="Queue all undownloaded books from this account">
+                            Queue All
+                        </button>
+                    </form>
                     <form action="/admin/accounts/{{ account.id }}/toggle" method="POST" style="display: inline;">
                         <button type="submit" class="btn btn-sm btn-secondary">
                             {% if account.enabled %}Disable{% else %}Enable{% endif %}
@@ -244,6 +249,17 @@
 .btn-success:hover {
     background-color: #218838;
     border-color: #1e7e34;
+}
+
+.btn-info {
+    background-color: #17a2b8;
+    border-color: #17a2b8;
+    color: white;
+}
+
+.btn-info:hover {
+    background-color: #138496;
+    border-color: #117a8b;
 }
 
 .add-account-form {

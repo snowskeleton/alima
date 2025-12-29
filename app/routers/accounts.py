@@ -406,3 +406,75 @@ async def trigger_sync(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Sync failed: {str(e)}",
         )
+
+
+@router.post("/{account_id}/queue-all", response_class=HTMLResponse)
+async def queue_all_books(
+    account_id: int,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Queue all undownloaded books from this account for download."""
+    from ..models import Book, DownloadQueue, DownloadStatus, DownloadType
+
+    account = db.query(AudibleAccount).filter(AudibleAccount.id == account_id).first()
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Account with ID {account_id} not found",
+        )
+
+    # Get all books for this account that don't have files
+    books_without_files = db.query(Book).filter(
+        Book.audible_account_id == account_id,
+        Book.file_path.is_(None)
+    ).all()
+
+    stats = {
+        "queued": 0,
+        "requeued": 0,
+        "already_queued": 0,
+        "skipped": 0,
+    }
+
+    for book in books_without_files:
+        # Check if book has download enabled
+        if not book.download_enabled:
+            stats["skipped"] += 1
+            continue
+
+        # Check if there's an existing queue entry for this book
+        existing_entry = db.query(DownloadQueue).filter(
+            DownloadQueue.book_id == book.id,
+            DownloadQueue.download_type == DownloadType.BOOK
+        ).first()
+
+        if existing_entry:
+            # If it's pending or downloading, skip
+            if existing_entry.status in [DownloadStatus.PENDING, DownloadStatus.DOWNLOADING, DownloadStatus.DECRYPTING]:
+                stats["already_queued"] += 1
+                continue
+
+            # If it's failed or completed, reset to pending
+            if existing_entry.status in [DownloadStatus.FAILED, DownloadStatus.COMPLETED]:
+                existing_entry.status = DownloadStatus.PENDING
+                existing_entry.attempts = 0
+                existing_entry.error_message = None
+                stats["requeued"] += 1
+        else:
+            # Create new queue entry
+            queue_entry = DownloadQueue(
+                book_id=book.id,
+                audible_account_id=account_id,
+                asin=book.asin,
+                download_type=DownloadType.BOOK,
+                priority=0,
+                status=DownloadStatus.PENDING,
+                attempts=0,
+            )
+            db.add(queue_entry)
+            stats["queued"] += 1
+
+    db.commit()
+
+    return RedirectResponse(url="/admin/accounts", status_code=status.HTTP_303_SEE_OTHER)

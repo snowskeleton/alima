@@ -135,10 +135,16 @@
                 <td class="col-size">
                     {% if entry.file_size_bytes %}
                         {% set gb = entry.file_size_bytes / 1024 / 1024 / 1024 %}
-                        {% if gb < 1 %}
-                            {{ (entry.file_size_bytes / 1024 / 1024)|int }}MB
-                        {% else %}
+                        {% set mb = entry.file_size_bytes / 1024 / 1024 %}
+                        {% set kb = entry.file_size_bytes / 1024 %}
+                        {% if gb >= 1 %}
                             {{ "%.1f"|format(gb) }}GB
+                        {% elif mb >= 1 %}
+                            {{ "%.1f"|format(mb) }}MB
+                        {% elif kb >= 1 %}
+                            {{ "%.1f"|format(kb) }}KB
+                        {% else %}
+                            {{ entry.file_size_bytes }}B
                         {% endif %}
                     {% else %}-{% endif %}
                 </td>
