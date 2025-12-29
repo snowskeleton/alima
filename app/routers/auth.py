@@ -320,12 +320,55 @@ async def profile_page(
     current_user: User = Depends(get_current_user),
 ):
     """Display user profile page."""
+    from ..utils.flash import get_flashed_messages
+
     return templates.TemplateResponse(
         request=request,
         name="auth/profile.html",
         context={
             "current_user": current_user,
+            "messages": get_flashed_messages(request),
         },
+    )
+
+
+@router.post("/change-password")
+async def change_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    new_password_confirm: str = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Change user password."""
+    from ..auth import verify_password
+    from ..utils.flash import flash
+
+    # Verify passwords match
+    if new_password != new_password_confirm:
+        flash(request, "New passwords do not match", "error")
+        return RedirectResponse(
+            url="/auth/profile",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    # Verify current password
+    if not verify_password(current_password, current_user.password_hash):
+        flash(request, "Current password is incorrect", "error")
+        return RedirectResponse(
+            url="/auth/profile",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    # Update password
+    current_user.password_hash = get_password_hash(new_password)
+    db.commit()
+
+    flash(request, "Password changed successfully!", "success")
+    return RedirectResponse(
+        url="/auth/profile",
+        status_code=status.HTTP_303_SEE_OTHER,
     )
 
 

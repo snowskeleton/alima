@@ -127,8 +127,12 @@ class BookMatcherService:
         Returns:
             Confidence score (0-100)
         """
+        # Handle None metadata
+        if file_metadata is None:
+            file_metadata = {}
+
         # Title match (70% weight)
-        file_title = file_metadata.get("title", "").lower()
+        file_title = (file_metadata.get("title") or "").lower()
         book_title = book.title.lower() if book.title else ""
 
         if not file_title or not book_title:
@@ -137,7 +141,7 @@ class BookMatcherService:
             title_score = fuzz.ratio(file_title, book_title)
 
         # Author match (15% weight)
-        file_author = file_metadata.get("author", "").lower()
+        file_author = (file_metadata.get("author") or "").lower()
         book_author = book.author.lower() if book.author else ""
 
         if not file_author or not book_author:
