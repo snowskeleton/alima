@@ -22,7 +22,7 @@ services:
     container_name: alima
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8083:8000"
     depends_on:
       postgres:
         condition: service_healthy
