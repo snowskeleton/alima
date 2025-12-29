@@ -4,6 +4,8 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 # Configure logging
@@ -116,11 +118,37 @@ app = FastAPI(
 # Exception handler for authentication redirects
 from .dependencies import UnauthenticatedException
 
+templates = Jinja2Templates(directory="app/templates")
+
 
 @app.exception_handler(UnauthenticatedException)
 async def unauthenticated_exception_handler(request: Request, exc: UnauthenticatedException):
     """Handle authentication exceptions by redirecting to login/register."""
     return RedirectResponse(url=exc.redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors with user-friendly HTML error page."""
+    from .utils.flash import flash
+
+    # Extract error details
+    errors = exc.errors()
+    error_messages = []
+    for error in errors:
+        field = " → ".join(str(loc) for loc in error["loc"])
+        msg = error["msg"]
+        error_messages.append(f"{field}: {msg}")
+
+    error_text = "; ".join(error_messages)
+
+    # Flash error and redirect back
+    flash(request, f"Validation error: {error_text}", "error")
+
+    # Try to redirect to referer, or a sensible default
+    referer = request.headers.get("referer", "/")
+    return RedirectResponse(url=referer, status_code=status.HTTP_303_SEE_OTHER)
+
 
 # Add session middleware for flash messages
 app.add_middleware(

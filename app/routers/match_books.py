@@ -5,7 +5,7 @@ from typing import Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, Query, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
@@ -26,9 +26,27 @@ async def match_books_page(
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Display the book matching page."""
+    """Display the book matching page (loads quickly, results fetched via AJAX)."""
     from ..utils.flash import get_flashed_messages
 
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/match_books.html",
+        context={
+            "current_user": current_user,
+            "threshold": threshold,
+            "messages": get_flashed_messages(request),
+        },
+    )
+
+
+@router.get("/api/matches", response_class=JSONResponse)
+async def get_matches(
+    threshold: float = Query(85.0, ge=50.0, le=100.0, description="Confidence threshold"),
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """API endpoint to fetch matches (called via JavaScript)."""
     matcher_service = BookMatcherService(db)
 
     # Get matches
@@ -42,18 +60,53 @@ async def match_books_page(
         .all()
     )
 
-    return templates.TemplateResponse(
-        request=request,
-        name="admin/match_books.html",
-        context={
-            "current_user": current_user,
-            "matched_files": matches["matched"],
-            "unmatched_files": matches["unmatched"],
-            "available_books": available_books,
-            "threshold": threshold,
-            "messages": get_flashed_messages(request),
-        },
-    )
+    # Convert to JSON-serializable format
+    matched_data = []
+    for match in matches["matched"]:
+        matched_data.append({
+            "filename": match["filename"],
+            "file_size": match["file_size"],
+            "metadata": match["metadata"] or {},
+            "matched_book": {
+                "id": match["matched_book"].id,
+                "title": match["matched_book"].title,
+                "author": match["matched_book"].author,
+                "series": match["matched_book"].series,
+                "series_position": match["matched_book"].series_position,
+            },
+            "confidence": match["confidence"],
+        })
+
+    unmatched_data = []
+    for file in matches["unmatched"]:
+        file_data = {
+            "filename": file["filename"],
+            "file_size": file["file_size"],
+            "metadata": file["metadata"] or {},
+        }
+        if file.get("suggested_book"):
+            file_data["suggested_book"] = {
+                "id": file["suggested_book"].id,
+                "title": file["suggested_book"].title,
+                "author": file["suggested_book"].author,
+            }
+            file_data["confidence"] = file.get("confidence", 0)
+        unmatched_data.append(file_data)
+
+    books_data = [
+        {
+            "id": book.id,
+            "title": book.title,
+            "author": book.author,
+        }
+        for book in available_books
+    ]
+
+    return {
+        "matched": matched_data,
+        "unmatched": unmatched_data,
+        "available_books": books_data,
+    }
 
 
 @router.post("/{filename}/confirm/{book_id}")
