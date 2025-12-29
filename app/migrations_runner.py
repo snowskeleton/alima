@@ -91,7 +91,7 @@ def run_migration_008_add_download_type(db: Session, engine) -> None:
             logger.info("Adding download_type column to download_queue table...")
             db.execute(text("""
                 ALTER TABLE download_queue
-                ADD COLUMN download_type downloadtype DEFAULT 'book' NOT NULL
+                ADD COLUMN download_type downloadtype DEFAULT 'book'::downloadtype NOT NULL
             """))
         else:
             # SQLite: Check if column exists
