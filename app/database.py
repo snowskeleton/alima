@@ -1,7 +1,6 @@
 """Database session management and initialization."""
 
 from collections.abc import Generator
-from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -12,9 +11,9 @@ from .models import Base
 # Create engine
 engine = create_engine(
     settings.database_url,
-    connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {},
     echo=False,
     # echo=settings.environment == "development",
+    pool_pre_ping=True,  # Verify connections before using
 )
 
 # Create session factory
@@ -41,11 +40,6 @@ def init_db() -> None:
 
     This function should be called during application startup or via CLI.
     """
-    # Ensure database directory exists
-    db_path = settings.database_url.replace("sqlite:///", "")
-    db_dir = Path(db_path).parent
-    db_dir.mkdir(parents=True, exist_ok=True)
-
     # Create all tables
     Base.metadata.create_all(bind=engine)
 

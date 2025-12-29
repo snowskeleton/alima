@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     environment: str = "development"
 
     # Database
-    database_url: str = "sqlite:///data/db/alima.db"
+    database_url: str = "postgresql://alima:changeme@postgres:5432/alima"
 
     # Paths
     audiobooks_path: Path = Path("/app/data/audiobooks")
