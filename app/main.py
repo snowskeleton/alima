@@ -70,6 +70,19 @@ async def lifespan(app: FastAPI):
         init_db()
         print("✓ Database initialized")
 
+        # Run pending migrations
+        from .database import SessionLocal
+        from .migrations_runner import run_all_pending_migrations
+
+        db = SessionLocal()
+        try:
+            run_all_pending_migrations(db)
+            print("✓ Database migrations applied")
+        except Exception as e:
+            print(f"⚠ Warning: Migration error (continuing anyway): {e}")
+        finally:
+            db.close()
+
         # Ensure data directories exist
         settings.audiobooks_path.mkdir(parents=True, exist_ok=True)
         settings.covers_path.mkdir(parents=True, exist_ok=True)

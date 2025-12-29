@@ -141,6 +141,7 @@ class BookResponse(BookBase):
     file_size: Optional[int] = None
     file_format: Optional[str] = None
     cover_image_path: Optional[str] = None
+    download_enabled: bool = True
     metadata_source: MetadataSource
     added_at: datetime
     downloaded_at: Optional[datetime] = None

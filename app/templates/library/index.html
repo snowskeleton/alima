@@ -6,7 +6,7 @@
 <div class="page-header">
     <div>
         <h1>Audiobook Library</h1>
-        <p>{{ books|length }} books</p>
+        <p id="book-count">Showing <span id="loaded-count">{{ initial_load }}</span> of <span id="total-count">{{ total_count }}</span> books</p>
     </div>
     <div class="view-selector">
         <a href="?view=grid{% if filters.search %}&search={{ filters.search }}{% endif %}{% if filters.status %}&status={{ filters.status }}{% endif %}{% if filters.source %}&source={{ filters.source }}{% endif %}{% if filters.series_filter %}&series_filter={{ filters.series_filter }}{% endif %}"
@@ -241,6 +241,199 @@ document.querySelectorAll('input[type="text"]').forEach(input => {
         }, 500);
     });
 });
+
+// Infinite scroll
+(function() {
+    const currentView = '{{ view }}';
+    const totalCount = {{ total_count }};
+    let loadedCount = {{ initial_load }};
+    let isLoading = false;
+    let hasMore = loadedCount < totalCount;
+
+    // Get current filters from URL params
+    const urlParams = new URLSearchParams(window.location.search);
+    const filters = {
+        search: urlParams.get('search') || '',
+        status: urlParams.get('status') || '',
+        source: urlParams.get('source') || '',
+        series_filter: urlParams.get('series_filter') || '',
+        sort: urlParams.get('sort') || 'added_at',
+        order: urlParams.get('order') || 'desc'
+    };
+
+    // Format duration helper
+    function formatDuration(seconds) {
+        if (!seconds) return '';
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        return `${hours}h ${minutes}m`;
+    }
+
+    // Create book card HTML (grid view)
+    function createGridBookCard(book) {
+        const coverHtml = book.cover_image_path
+            ? `<img src="/files/covers/${book.cover_image_path.split('/').pop()}" alt="${book.title}" />`
+            : '<div class="book-cover-placeholder"><span>📖</span></div>';
+
+        let statusBadge = '';
+        if (book.file_path) {
+            statusBadge = '<span class="badge badge-success">Downloaded</span>';
+        } else if (!book.download_enabled) {
+            statusBadge = '<span class="badge badge-disabled">Auto-Download Disabled</span>';
+        } else {
+            statusBadge = '<span class="badge badge-secondary">Pending Download</span>';
+        }
+
+        return `
+            <div class="book-card">
+                <a href="/library/${book.id}" class="book-cover">${coverHtml}</a>
+                <div class="book-info">
+                    <h3 class="book-title"><a href="/library/${book.id}">${book.title}</a></h3>
+                    ${book.subtitle ? `<p class="book-subtitle">${book.subtitle}</p>` : ''}
+                    ${book.author ? `<p class="book-author">By ${book.author}</p>` : ''}
+                    ${book.narrator ? `<p class="book-narrator">Narrated by ${book.narrator}</p>` : ''}
+                    ${book.series ? `<p class="book-series">${book.series}${book.series_position ? ` #${book.series_position}` : ''}</p>` : ''}
+                    ${book.duration_seconds ? `<p class="book-duration">Duration: ${formatDuration(book.duration_seconds)}</p>` : ''}
+                    <div class="book-status">${statusBadge}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Create book list item HTML (list view)
+    function createListBookItem(book) {
+        const coverHtml = book.cover_image_path
+            ? `<img src="/files/covers/${book.cover_image_path.split('/').pop()}" alt="${book.title}" />`
+            : '<div class="book-cover-placeholder"><span>📖</span></div>';
+
+        let statusBadge = '';
+        if (book.file_path) {
+            statusBadge = '<span class="badge badge-success">Downloaded</span>';
+        } else if (!book.download_enabled) {
+            statusBadge = '<span class="badge badge-disabled">Disabled</span>';
+        } else {
+            statusBadge = '<span class="badge badge-secondary">Pending</span>';
+        }
+
+        const metaParts = [];
+        if (book.author) metaParts.push(`<span>${book.author}</span>`);
+        if (book.narrator) metaParts.push(`<span class="text-muted">• ${book.narrator}</span>`);
+        if (book.series) metaParts.push(`<span class="text-muted">• ${book.series}${book.series_position ? ` #${book.series_position}` : ''}</span>`);
+        if (book.duration_seconds) metaParts.push(`<span class="text-muted">• ${formatDuration(book.duration_seconds)}</span>`);
+
+        return `
+            <div class="book-list-item">
+                <a href="/library/${book.id}" class="book-list-cover">${coverHtml}</a>
+                <div class="book-list-info">
+                    <h3 class="book-list-title"><a href="/library/${book.id}">${book.title}</a></h3>
+                    <div class="book-list-meta">${metaParts.join('')}</div>
+                    ${book.subtitle ? `<p class="book-list-subtitle">${book.subtitle}</p>` : ''}
+                </div>
+                <div class="book-list-status">${statusBadge}</div>
+            </div>
+        `;
+    }
+
+    // Create compact table row HTML (compact view)
+    function createCompactBookRow(book) {
+        let statusBadge = '';
+        if (book.file_path) {
+            statusBadge = '<span class="badge badge-success">Downloaded</span>';
+        } else if (!book.download_enabled) {
+            statusBadge = '<span class="badge badge-disabled">Disabled</span>';
+        } else {
+            statusBadge = '<span class="badge badge-secondary">Pending</span>';
+        }
+
+        return `
+            <tr>
+                <td class="col-title">
+                    <a href="/library/${book.id}">${book.title}</a>
+                    ${book.subtitle ? `<div class="subtitle-text">${book.subtitle}</div>` : ''}
+                </td>
+                <td class="col-author">${book.author || '-'}</td>
+                <td class="col-series">${book.series ? `${book.series}${book.series_position ? ` #${book.series_position}` : ''}` : '-'}</td>
+                <td class="col-duration">${book.duration_seconds ? formatDuration(book.duration_seconds) : '-'}</td>
+                <td class="col-status">${statusBadge}</td>
+            </tr>
+        `;
+    }
+
+    // Load more books
+    async function loadMore() {
+        if (isLoading || !hasMore) return;
+
+        isLoading = true;
+
+        try {
+            // Build query params
+            const params = new URLSearchParams({
+                offset: loadedCount,
+                limit: 50,
+                ...filters
+            });
+
+            const response = await fetch(`/library/api/more-books?${params}`);
+            if (!response.ok) throw new Error('Failed to load more books');
+
+            const books = await response.json();
+
+            if (books.length === 0) {
+                hasMore = false;
+                return;
+            }
+
+            // Append books to the appropriate container
+            if (currentView === 'grid') {
+                const grid = document.querySelector('.books-grid');
+                books.forEach(book => {
+                    grid.insertAdjacentHTML('beforeend', createGridBookCard(book));
+                });
+            } else if (currentView === 'list') {
+                const list = document.querySelector('.books-list');
+                books.forEach(book => {
+                    list.insertAdjacentHTML('beforeend', createListBookItem(book));
+                });
+            } else if (currentView === 'compact') {
+                const tbody = document.querySelector('.compact-table tbody');
+                books.forEach(book => {
+                    tbody.insertAdjacentHTML('beforeend', createCompactBookRow(book));
+                });
+            }
+
+            loadedCount += books.length;
+            document.getElementById('loaded-count').textContent = loadedCount;
+
+            if (loadedCount >= totalCount) {
+                hasMore = false;
+            }
+        } catch (error) {
+            console.error('Error loading more books:', error);
+        } finally {
+            isLoading = false;
+        }
+    }
+
+    // Detect scroll near bottom
+    function handleScroll() {
+        if (isLoading || !hasMore) return;
+
+        const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+        const windowHeight = window.innerHeight;
+        const documentHeight = document.documentElement.scrollHeight;
+
+        // Load more when we're 500px from the bottom
+        if (scrollTop + windowHeight >= documentHeight - 500) {
+            loadMore();
+        }
+    }
+
+    // Attach scroll listener
+    window.addEventListener('scroll', handleScroll);
+
+    // Also check on initial load in case content doesn't fill screen
+    setTimeout(handleScroll, 100);
+})();
 </script>
 
 <style>

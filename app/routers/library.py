@@ -30,7 +30,7 @@ async def library_index(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    """Display library of all books."""
+    """Display library of all books (with pagination)."""
     query = db.query(Book)
 
     # Apply search filter
@@ -77,7 +77,12 @@ async def library_index(
     else:
         query = query.order_by(sort_column.asc())
 
-    books = query.all()
+    # Get total count for display
+    total_count = query.count()
+
+    # Load only initial batch (50 books)
+    initial_limit = 50
+    books = query.limit(initial_limit).all()
 
     return templates.TemplateResponse(
         request=request,
@@ -85,6 +90,8 @@ async def library_index(
         context={
             "current_user": current_user,
             "books": books,
+            "total_count": total_count,
+            "initial_load": len(books),
             "filters": {
                 "search": search,
                 "status": status,
@@ -120,6 +127,72 @@ async def list_books_api(
 
     # Apply pagination
     books = query.order_by(Book.added_at.desc()).offset(offset).limit(limit).all()
+
+    return [BookResponse.model_validate(book) for book in books]
+
+
+@router.get("/api/more-books", response_model=list[BookResponse])
+async def load_more_books_api(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, le=200),
+    search: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+    series_filter: Optional[str] = Query(None),
+    sort: str = Query("added_at"),
+    order: str = Query("desc"),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Get paginated books with filters (for infinite scroll)."""
+    query = db.query(Book)
+
+    # Apply search filter
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            (Book.title.ilike(search_term))
+            | (Book.author.ilike(search_term))
+            | (Book.series.ilike(search_term))
+            | (Book.narrator.ilike(search_term))
+        )
+
+    # Apply status filter
+    if status == "downloaded":
+        query = query.filter(Book.file_path.isnot(None))
+    elif status == "pending":
+        query = query.filter(
+            Book.file_path.is_(None),
+            Book.download_enabled == True,
+            Book.download_unavailable == False,
+        )
+    elif status == "disabled":
+        query = query.filter(
+            Book.file_path.is_(None),
+            Book.download_enabled == False,
+        )
+    elif status == "unavailable":
+        query = query.filter(Book.download_unavailable == True)
+
+    # Apply source filter
+    if source:
+        query = query.filter(Book.source == source)
+
+    # Apply series filter
+    if series_filter == "series":
+        query = query.filter(Book.series.isnot(None))
+    elif series_filter == "standalone":
+        query = query.filter(Book.series.is_(None))
+
+    # Apply sorting
+    sort_column = getattr(Book, sort, Book.added_at)
+    if order == "desc":
+        query = query.order_by(sort_column.desc())
+    else:
+        query = query.order_by(sort_column.asc())
+
+    # Apply pagination
+    books = query.offset(offset).limit(limit).all()
 
     return [BookResponse.model_validate(book) for book in books]
 

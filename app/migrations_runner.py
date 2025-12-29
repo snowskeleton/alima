@@ -1,0 +1,144 @@
+"""Automatic migration runner for database schema updates."""
+
+import logging
+from pathlib import Path
+from typing import Optional
+
+from sqlalchemy import Column, DateTime, Integer, String, Table, create_engine, text
+from sqlalchemy.orm import Session
+
+from .config import settings
+
+logger = logging.getLogger(__name__)
+
+
+def get_migration_table(engine):
+    """Get or create the migration tracking table."""
+    from sqlalchemy import MetaData
+
+    metadata = MetaData()
+
+    migration_table = Table(
+        'schema_migrations',
+        metadata,
+        Column('id', Integer, primary_key=True, autoincrement=True),
+        Column('migration_name', String(255), unique=True, nullable=False),
+        Column('applied_at', DateTime, nullable=False, server_default=text('CURRENT_TIMESTAMP')),
+    )
+
+    # Create table if it doesn't exist
+    metadata.create_all(engine)
+
+    return migration_table
+
+
+def has_migration_been_applied(db: Session, migration_name: str) -> bool:
+    """Check if a migration has already been applied."""
+    result = db.execute(
+        text("SELECT COUNT(*) FROM schema_migrations WHERE migration_name = :name"),
+        {"name": migration_name}
+    )
+    count = result.scalar()
+    return count > 0
+
+
+def mark_migration_applied(db: Session, migration_name: str) -> None:
+    """Mark a migration as applied."""
+    db.execute(
+        text("INSERT INTO schema_migrations (migration_name) VALUES (:name)"),
+        {"name": migration_name}
+    )
+    db.commit()
+
+
+def run_migration_008_add_download_type(db: Session, engine) -> None:
+    """Add download_type column to download_queue table."""
+    migration_name = "008_add_download_type"
+
+    if has_migration_been_applied(db, migration_name):
+        logger.info(f"Migration {migration_name} already applied, skipping")
+        return
+
+    logger.info(f"Running migration: {migration_name}")
+
+    is_postgres = "postgresql" in str(engine.url)
+
+    try:
+        if is_postgres:
+            # PostgreSQL: Create enum type first, then add column
+            logger.info("Creating downloadtype enum type...")
+            db.execute(text("""
+                DO $$ BEGIN
+                    CREATE TYPE downloadtype AS ENUM ('book', 'cover');
+                EXCEPTION
+                    WHEN duplicate_object THEN null;
+                END $$;
+            """))
+            db.commit()
+
+            # Check if column already exists
+            result = db.execute(text("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name='download_queue' AND column_name='download_type'
+            """))
+
+            if result.fetchone():
+                logger.info("Column 'download_type' already exists")
+                mark_migration_applied(db, migration_name)
+                return
+
+            logger.info("Adding download_type column to download_queue table...")
+            db.execute(text("""
+                ALTER TABLE download_queue
+                ADD COLUMN download_type downloadtype DEFAULT 'book' NOT NULL
+            """))
+        else:
+            # SQLite: Check if column exists
+            result = db.execute(text("PRAGMA table_info(download_queue)"))
+            columns = [col[1] for col in result.fetchall()]
+
+            if "download_type" in columns:
+                logger.info("Column 'download_type' already exists")
+                mark_migration_applied(db, migration_name)
+                return
+
+            logger.info("Adding download_type column to download_queue table...")
+            db.execute(text("""
+                ALTER TABLE download_queue
+                ADD COLUMN download_type VARCHAR(10) DEFAULT 'book' NOT NULL
+            """))
+
+        db.commit()
+        mark_migration_applied(db, migration_name)
+        logger.info(f"Migration {migration_name} completed successfully!")
+
+    except Exception as e:
+        logger.error(f"Migration {migration_name} failed: {e}", exc_info=True)
+        db.rollback()
+        raise
+
+
+def run_all_pending_migrations(db: Session) -> None:
+    """Run all pending migrations in order."""
+    from .database import engine
+
+    logger.info("Checking for pending migrations...")
+
+    # Ensure migration tracking table exists
+    get_migration_table(engine)
+
+    # List of migrations in order
+    migrations = [
+        run_migration_008_add_download_type,
+    ]
+
+    for migration_func in migrations:
+        try:
+            migration_func(db, engine)
+        except Exception as e:
+            logger.error(f"Failed to run migration {migration_func.__name__}: {e}")
+            # Don't stop on migration errors, continue with others
+            continue
+
+    logger.info("Migration check complete")
