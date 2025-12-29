@@ -55,13 +55,38 @@ def run_migration_008_add_download_type(db: Session, engine) -> None:
     """Add download_type column to download_queue table."""
     migration_name = "008_add_download_type"
 
-    if has_migration_been_applied(db, migration_name):
-        logger.info(f"Migration {migration_name} already applied, skipping")
+    is_postgres = "postgresql" in str(engine.url)
+
+    # Check if column actually exists (more reliable than migration tracking)
+    column_exists = False
+    if is_postgres:
+        result = db.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name='download_queue' AND column_name='download_type'
+        """))
+        column_exists = result.fetchone() is not None
+    else:
+        result = db.execute(text("PRAGMA table_info(download_queue)"))
+        columns = [col[1] for col in result.fetchall()]
+        column_exists = "download_type" in columns
+
+    if column_exists:
+        logger.info(f"Column download_type already exists, ensuring migration is marked as applied")
+        if not has_migration_been_applied(db, migration_name):
+            mark_migration_applied(db, migration_name)
         return
 
-    logger.info(f"Running migration: {migration_name}")
+    if has_migration_been_applied(db, migration_name):
+        logger.warning(f"Migration {migration_name} was marked as applied but column doesn't exist - re-running")
+        # Remove the bad migration record
+        db.execute(
+            text("DELETE FROM schema_migrations WHERE migration_name = :name"),
+            {"name": migration_name}
+        )
+        db.commit()
 
-    is_postgres = "postgresql" in str(engine.url)
+    logger.info(f"Running migration: {migration_name}")
 
     try:
         if is_postgres:
@@ -76,33 +101,13 @@ def run_migration_008_add_download_type(db: Session, engine) -> None:
             """))
             db.commit()
 
-            # Check if column already exists
-            result = db.execute(text("""
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_name='download_queue' AND column_name='download_type'
-            """))
-
-            if result.fetchone():
-                logger.info("Column 'download_type' already exists")
-                mark_migration_applied(db, migration_name)
-                return
-
             logger.info("Adding download_type column to download_queue table...")
             db.execute(text("""
                 ALTER TABLE download_queue
                 ADD COLUMN download_type downloadtype DEFAULT 'book'::downloadtype NOT NULL
             """))
         else:
-            # SQLite: Check if column exists
-            result = db.execute(text("PRAGMA table_info(download_queue)"))
-            columns = [col[1] for col in result.fetchall()]
-
-            if "download_type" in columns:
-                logger.info("Column 'download_type' already exists")
-                mark_migration_applied(db, migration_name)
-                return
-
+            # SQLite
             logger.info("Adding download_type column to download_queue table...")
             db.execute(text("""
                 ALTER TABLE download_queue
