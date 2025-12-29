@@ -201,7 +201,9 @@ document.querySelectorAll('input[type="text"]').forEach(input => {
     });
 });
 
-// Checkbox selection
+// Checkbox selection with shift-click support
+let lastChecked = null;
+
 function toggleAll(checkbox) {
     document.querySelectorAll('.entry-checkbox').forEach(cb => {
         cb.checked = checkbox.checked;
@@ -212,6 +214,34 @@ function getSelectedIds() {
     return Array.from(document.querySelectorAll('.entry-checkbox:checked'))
         .map(cb => cb.value);
 }
+
+// Handle shift-click for range selection
+document.addEventListener('DOMContentLoaded', function() {
+    const checkboxes = document.querySelectorAll('.entry-checkbox');
+
+    checkboxes.forEach(checkbox => {
+        checkbox.addEventListener('click', function(e) {
+            if (!lastChecked) {
+                lastChecked = this;
+                return;
+            }
+
+            if (e.shiftKey) {
+                const start = Array.from(checkboxes).indexOf(this);
+                const end = Array.from(checkboxes).indexOf(lastChecked);
+                const checkboxArray = Array.from(checkboxes);
+
+                const [min, max] = [Math.min(start, end), Math.max(start, end)];
+
+                for (let i = min; i <= max; i++) {
+                    checkboxArray[i].checked = this.checked;
+                }
+            }
+
+            lastChecked = this;
+        });
+    });
+});
 
 function markSelectedAsRead() {
     const ids = getSelectedIds();
