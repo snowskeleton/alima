@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}Sync Results - {{ account.username }}{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="result-card success">
+        <div class="result-icon">✓</div>
+        <h1>Sync Completed Successfully</h1>
+        <p class="account-name">Account: <strong>{{ account.username }}</strong></p>
+
+        <div class="stats-grid">
+            <div class="stat-item">
+                <div class="stat-value">{{ stats.total }}</div>
+                <div class="stat-label">Total Books</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">{{ stats.new }}</div>
+                <div class="stat-label">New Books</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">{{ stats.updated }}</div>
+                <div class="stat-label">Updated</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">{{ stats.queued }}</div>
+                <div class="stat-label">Queued for Download</div>
+            </div>
+        </div>
+
+        <div class="action-buttons">
+            <a href="/admin/accounts" class="btn btn-primary">Back to Accounts</a>
+            <a href="/library" class="btn btn-secondary">View Library</a>
+        </div>
+    </div>
+</div>
+
+<style>
+.container {
+    max-width: 600px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+}
+
+.result-card {
+    background: white;
+    border-radius: 8px;
+    padding: 3rem 2rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    text-align: center;
+}
+
+.result-card.success {
+    border-top: 4px solid #28a745;
+}
+
+.result-icon {
+    width: 80px;
+    height: 80px;
+    line-height: 80px;
+    font-size: 50px;
+    margin: 0 auto 1rem;
+    background: #28a745;
+    color: white;
+    border-radius: 50%;
+}
+
+.result-card h1 {
+    margin: 0 0 1rem 0;
+    font-size: 1.75rem;
+    color: #333;
+}
+
+.account-name {
+    font-size: 1.1rem;
+    color: #666;
+    margin-bottom: 2rem;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 1.5rem;
+    margin: 2rem 0;
+    padding: 2rem;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.stat-item {
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 2.5rem;
+    font-weight: bold;
+    color: var(--primary-color);
+    line-height: 1;
+}
+
+.stat-label {
+    font-size: 0.875rem;
+    color: #666;
+    margin-top: 0.5rem;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    margin-top: 2rem;
+}
+
+.action-buttons .btn {
+    flex: 1;
+    max-width: 200px;
+}
+</style>
+{% endblock %}

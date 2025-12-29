@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+
+{% block title %}Add Audible Account - Login{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>Add Audible Account - Direct Login</h1>
+
+    <div class="card">
+        <!-- Step 1: Select Marketplace -->
+        <div id="step1" class="step">
+            <h2>Step 1: Select Your Audible Marketplace</h2>
+            <form id="marketplaceForm">
+                <div class="form-group">
+                    <label for="marketplace">Marketplace:</label>
+                    <select id="marketplace" name="marketplace" required>
+                        {% for code, name in marketplaces.items() %}
+                        <option value="{{ code }}">{{ name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="with_username" name="with_username" value="true">
+                        I have a pre-Amazon Audible account (username instead of email)
+                    </label>
+                    <p class="help-text">Only check this if you registered with Audible before Amazon acquisition (very rare)</p>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Generate Login URL</button>
+                <a href="/admin/accounts" class="btn btn-secondary">Cancel</a>
+            </form>
+        </div>
+
+        <!-- Step 2: Login with External Browser -->
+        <div id="step2" class="step" style="display: none;">
+            <h2>Step 2: Login with Your Browser</h2>
+            <p>Click the button below to open the Audible login page in a new tab:</p>
+
+            <a id="loginButton" href="#" target="_blank" class="btn btn-primary btn-large">
+                Open Audible Login Page
+            </a>
+
+            <div class="instructions">
+                <h3>Instructions:</h3>
+                <ol>
+                    <li>Click the "Open Audible Login Page" button above</li>
+                    <li>Log in with your Amazon/Audible credentials in the new tab</li>
+                    <li>Complete any additional verification (2FA, captcha, etc.)</li>
+                    <li>After login, you'll see a "Page Not Found" error - this is expected!</li>
+                    <li>Copy the <strong>entire URL</strong> from your browser's address bar</li>
+                    <li>Paste it in the field below and click "Complete Setup"</li>
+                </ol>
+
+                <div class="warning-box">
+                    <strong>Important:</strong> The URL you copy should look like:<br>
+                    <code>https://www.amazon.com/ap/maplanding?openid.oa2.authorization_code=...</code>
+                </div>
+            </div>
+
+            <button onclick="showStep3()" class="btn btn-primary">I've Logged In - Continue</button>
+            <button onclick="showStep1()" class="btn btn-secondary">Back</button>
+        </div>
+
+        <!-- Step 3: Paste Redirect URL -->
+        <div id="step3" class="step" style="display: none;">
+            <h2>Step 3: Complete Authentication</h2>
+            <form id="completeForm">
+                <input type="hidden" id="session_id" name="session_id">
+
+                <div class="form-group">
+                    <label for="redirect_url">Paste the URL from your browser:</label>
+                    <textarea
+                        id="redirect_url"
+                        name="redirect_url"
+                        rows="4"
+                        placeholder="https://www.amazon.com/ap/maplanding?openid.oa2.authorization_code=..."
+                        required
+                    ></textarea>
+                    <p class="help-text">Copy the entire URL from your browser's address bar after logging in</p>
+                </div>
+
+                <div id="error-message" class="error-message" style="display: none;"></div>
+                <div id="success-message" class="success-message" style="display: none;"></div>
+
+                <button type="submit" class="btn btn-primary" id="completeButton">
+                    Complete Setup
+                </button>
+                <button type="button" onclick="showStep2()" class="btn btn-secondary">Back</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<style>
+.step {
+    padding: 20px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.form-group textarea {
+    font-family: monospace;
+    resize: vertical;
+}
+
+.checkbox-group label {
+    font-weight: normal;
+}
+
+.checkbox-group input[type="checkbox"] {
+    margin-right: 8px;
+}
+
+.help-text {
+    font-size: 12px;
+    color: #666;
+    margin-top: 5px;
+}
+
+.instructions {
+    margin: 30px 0;
+    padding: 20px;
+    background: #f5f5f5;
+    border-radius: 4px;
+}
+
+.instructions h3 {
+    margin-top: 0;
+}
+
+.instructions ol {
+    padding-left: 20px;
+}
+
+.instructions li {
+    margin-bottom: 10px;
+}
+
+.warning-box {
+    margin-top: 15px;
+    padding: 15px;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 4px;
+}
+
+.warning-box code {
+    display: block;
+    margin-top: 8px;
+    padding: 8px;
+    background: white;
+    border-radius: 3px;
+    font-size: 12px;
+    word-break: break-all;
+}
+
+.btn-large {
+    padding: 15px 30px;
+    font-size: 16px;
+    margin-bottom: 20px;
+}
+
+.error-message {
+    padding: 15px;
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    border-radius: 4px;
+    color: #721c24;
+    margin-bottom: 15px;
+}
+
+.success-message {
+    padding: 15px;
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    border-radius: 4px;
+    color: #155724;
+    margin-bottom: 15px;
+}
+</style>
+
+<script>
+let sessionId = null;
+
+function showStep1() {
+    document.getElementById('step1').style.display = 'block';
+    document.getElementById('step2').style.display = 'none';
+    document.getElementById('step3').style.display = 'none';
+}
+
+function showStep2() {
+    document.getElementById('step1').style.display = 'none';
+    document.getElementById('step2').style.display = 'block';
+    document.getElementById('step3').style.display = 'none';
+}
+
+function showStep3() {
+    document.getElementById('step1').style.display = 'none';
+    document.getElementById('step2').style.display = 'none';
+    document.getElementById('step3').style.display = 'block';
+    // Auto-focus the textarea
+    document.getElementById('redirect_url').focus();
+}
+
+// Handle marketplace form submission
+document.getElementById('marketplaceForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const formData = new FormData();
+    formData.append('marketplace', document.getElementById('marketplace').value);
+    formData.append('with_username', document.getElementById('with_username').checked);
+
+    const response = await fetch('/admin/accounts/login/generate-url', {
+        method: 'POST',
+        body: formData
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+        // Store session ID and set login URL
+        sessionId = data.session_id;
+        document.getElementById('session_id').value = sessionId;
+        document.getElementById('loginButton').href = data.oauth_url;
+
+        // Show step 2
+        showStep2();
+    }
+});
+
+// Handle complete form submission
+document.getElementById('completeForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const errorDiv = document.getElementById('error-message');
+    const successDiv = document.getElementById('success-message');
+    const submitButton = document.getElementById('completeButton');
+
+    errorDiv.style.display = 'none';
+    successDiv.style.display = 'none';
+    submitButton.disabled = true;
+    submitButton.textContent = 'Processing...';
+
+    const formData = new FormData(e.target);
+
+    try {
+        const response = await fetch('/admin/accounts/login/complete', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || 'Authentication failed');
+        }
+
+        // Show success message
+        successDiv.textContent = data.message;
+        successDiv.style.display = 'block';
+
+        // Redirect to accounts page after 2 seconds
+        setTimeout(() => {
+            window.location.href = '/admin/accounts';
+        }, 2000);
+
+    } catch (error) {
+        errorDiv.textContent = error.message;
+        errorDiv.style.display = 'block';
+        submitButton.disabled = false;
+        submitButton.textContent = 'Complete Setup';
+    }
+});
+</script>
+{% endblock %}

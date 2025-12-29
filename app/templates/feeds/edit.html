@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Feed - Alima{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Edit Feed: {{ feed.name }}</h1>
+</div>
+
+<form action="/feeds/{{ feed.id }}/update" method="POST" enctype="multipart/form-data">
+    <div class="form-group">
+        <label class="form-label">Feed Name</label>
+        <input type="text" name="name" class="form-input" value="{{ feed.name }}" required>
+    </div>
+
+    <div class="form-group">
+        <label class="form-label">Description</label>
+        <textarea name="description" class="form-input" rows="3">{{ feed.description or '' }}</textarea>
+    </div>
+
+    {% if feed.feed_type.value == 'smart' %}
+    <div class="form-group">
+        <label class="form-label">Filter By</label>
+        <select name="filter_type" class="form-input">
+            <option value="">All Books (No Filter)</option>
+            <option value="author" {% if feed.filter_criteria and feed.filter_criteria.get('type') == 'author' %}selected{% endif %}>Author</option>
+            <option value="series" {% if feed.filter_criteria and feed.filter_criteria.get('type') == 'series' %}selected{% endif %}>Series</option>
+            <option value="narrator" {% if feed.filter_criteria and feed.filter_criteria.get('type') == 'narrator' %}selected{% endif %}>Narrator</option>
+            <option value="genre" {% if feed.filter_criteria and feed.filter_criteria.get('type') == 'genre' %}selected{% endif %}>Genre</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label class="form-label">Filter Value</label>
+        <input type="text" name="filter_value" class="form-input" value="{{ feed.filter_criteria.get('value') if feed.filter_criteria else '' }}" placeholder="e.g. Brandon Sanderson">
+    </div>
+    {% endif %}
+
+    <div class="form-group">
+        <label class="form-label">Cover Image</label>
+        {% if feed.cover_image_path %}
+        <div class="current-cover">
+            <img src="/files/{{ feed.cover_image_path }}" alt="Current cover" style="max-width: 200px; margin-bottom: 1rem;">
+            <div>
+                <button type="button" class="btn btn-sm btn-danger" onclick="removeFeedCover({{ feed.id }})">Remove Cover</button>
+            </div>
+        </div>
+        {% endif %}
+        <input type="file" name="cover_image" class="form-input" accept="image/jpeg,image/png,image/webp">
+        <p class="form-hint">Recommended: 3000x3000px JPEG (max 10MB)</p>
+    </div>
+
+    <div class="form-group">
+        <label class="checkbox-label">
+            <input type="checkbox" name="is_public" value="true" {% if feed.is_public %}checked{% endif %}>
+            Make feed public
+        </label>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+        <a href="/feeds" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+
+<style>
+.form-hint {
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--secondary-color);
+}
+
+.current-cover {
+    margin-bottom: 1rem;
+}
+</style>
+
+<script>
+async function removeFeedCover(feedId) {
+    if (!confirm('Remove cover image?')) {
+        return;
+    }
+
+    await fetch(`/feeds/${feedId}/remove-cover`, {
+        method: 'POST',
+    });
+
+    window.location.reload();
+}
+</script>
+{% endblock %}

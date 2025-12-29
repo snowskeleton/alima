@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}My Feeds - Alima{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Feeds</h1>
+    <p>Browse and manage podcast RSS feeds</p>
+</div>
+
+<div class="actions">
+    <a href="/feeds/create" class="btn btn-primary">+ Create Feed</a>
+</div>
+
+<div class="section">
+    {% if feeds %}
+    <div class="feeds-list">
+        {% for feed in feeds %}
+        <div class="feed-card" onclick="goToFeed('{{ feed.slug }}', event)">
+            <div class="feed-header">
+                <h3>
+                    {{ feed.name }}
+                    {% if feed.is_pinned %}
+                    <span class="pin-icon" title="Pinned Feed">📌</span>
+                    {% endif %}
+                </h3>
+            </div>
+            <p class="feed-meta">
+                <span class="badge">{{ feed.feed_type.value }}</span>
+                {% if feed.is_public %}
+                <span class="badge badge-success">Public</span>
+                {% else %}
+                <span class="badge badge-secondary">Private</span>
+                {% endif %}
+            </p>
+            {% if feed.description %}
+            <p>{{ feed.description }}</p>
+            {% endif %}
+            <div class="feed-actions" onclick="event.stopPropagation()">
+                <button class="btn btn-sm" onclick="copyRssUrl('{{ domain }}/rss/{{ feed.slug }}')">Copy RSS URL</button>
+                {% if current_user.role.value == 'admin' %}
+                    {% if feed.is_pinned %}
+                    <button class="btn btn-sm btn-secondary" onclick="unpinFeed({{ feed.id }})">Unpin</button>
+                    {% elif feed.is_public %}
+                    <button class="btn btn-sm btn-secondary" onclick="pinFeed({{ feed.id }})">Pin</button>
+                    {% endif %}
+                {% endif %}
+                {% if feed.user_id == current_user.id and not feed.is_system %}
+                <button class="btn btn-sm btn-danger" onclick="deleteFeed({{ feed.id }})">Delete</button>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>No feeds available.</p>
+        <p><a href="/feeds/create">Create your first feed</a></p>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+.page-header {
+    margin-bottom: 2rem;
+}
+
+.actions {
+    margin-bottom: 2rem;
+}
+
+.section {
+    margin-bottom: 3rem;
+}
+
+.section h2 {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+    color: var(--text-color);
+}
+
+.feeds-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+.feed-card {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.feed-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.feed-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.feed-card h3 {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.pin-icon {
+    font-size: 1rem;
+    opacity: 0.7;
+}
+
+.feed-meta {
+    margin-bottom: 1rem;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.feed-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+    background: #f8f9fa;
+    border-radius: 0.5rem;
+}
+
+</style>
+
+<script>
+function goToFeed(slug, event) {
+    window.location.href = `/feed/${slug}`;
+}
+
+function copyRssUrl(url) {
+    navigator.clipboard.writeText(url).then(() => {
+        const button = event.target;
+        const originalText = button.textContent;
+        button.textContent = 'Copied!';
+        button.classList.add('btn-success');
+
+        setTimeout(() => {
+            button.textContent = originalText;
+            button.classList.remove('btn-success');
+        }, 2000);
+    });
+}
+
+async function deleteFeed(feedId) {
+    if (!confirm('Are you sure you want to delete this feed?')) {
+        return;
+    }
+
+    const response = await fetch(`/feeds/${feedId}`, {
+        method: 'DELETE',
+    });
+
+    const data = await response.json();
+    if (data.success) {
+        window.location.reload();
+    }
+}
+
+async function pinFeed(feedId) {
+    await fetch(`/feeds/${feedId}/pin`, {
+        method: 'POST',
+    });
+    window.location.reload();
+}
+
+async function unpinFeed(feedId) {
+    await fetch(`/feeds/${feedId}/unpin`, {
+        method: 'POST',
+    });
+    window.location.reload();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,75 @@
+services:
+  alima:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alima
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Application settings (override via .env file)
+      - APP_NAME=${APP_NAME:-Alima}
+      - SECRET_KEY=${SECRET_KEY}
+      - DOMAIN=${DOMAIN:-http://localhost:8000}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+
+      # Database
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///data/db/alima.db}
+
+      # Paths (these match the container paths)
+      - AUDIOBOOKS_PATH=/app/data/audiobooks
+      - COVERS_PATH=/app/data/covers
+      - AUDIBLE_AUTH_PATH=/app/data/audible_auth
+      - TEMP_PATH=/app/data/temp
+
+      # Email (optional)
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_FROM=${SMTP_FROM}
+
+      # Sync settings
+      - SYNC_INTERVAL_HOURS=${SYNC_INTERVAL_HOURS:-6}
+      - DOWNLOAD_QUALITY=${DOWNLOAD_QUALITY:-High}
+      - MAX_CONCURRENT_DOWNLOADS=${MAX_CONCURRENT_DOWNLOADS:-3}
+
+      # Session
+      - SESSION_EXPIRE_HOURS=${SESSION_EXPIRE_HOURS:-12410}
+      - INVITE_EXPIRE_DAYS=${INVITE_EXPIRE_DAYS:-7}
+
+      # Replication (optional)
+      - REPLICATION_MODE=${REPLICATION_MODE:-standalone}
+      - MASTER_URL=${MASTER_URL}
+      - MASTER_API_KEY=${MASTER_API_KEY}
+      - SLAVE_INSTANCES=${SLAVE_INSTANCES}
+      - REPLICATION_SYNC_INTERVAL_MINUTES=${REPLICATION_SYNC_INTERVAL_MINUTES:-15}
+      - REPLICATION_METHOD=${REPLICATION_METHOD:-http}
+      - RSYNC_USER=${RSYNC_USER}
+      - RSYNC_HOST=${RSYNC_HOST}
+      - RSYNC_PATH=${RSYNC_PATH}
+
+    volumes:
+      # Map data directories to host filesystem
+      - ./data/audiobooks:/app/data/audiobooks
+      - ./data/covers:/app/data/covers
+      - ./data/audible_auth:/app/data/audible_auth
+      - ./data/temp:/app/data/temp
+      - ./data/db:/app/data/db
+
+    # Optional: Add a reverse proxy network if using Caddy/Nginx
+    # networks:
+    #   - web
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# Optional: Define networks
+# networks:
+#   web:
+#     external: true

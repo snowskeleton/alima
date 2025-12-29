@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Alima - Audible Library Manager{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/main.css') }}">
+    {% block extra_css %}{% endblock %}
+    {% block head %}{% endblock %}
+</head>
+<body>
+    {% if current_user %}
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <a href="/library">Alima</a>
+            </div>
+            <div class="nav-menu">
+                <a href="/library" class="nav-link">Library</a>
+                <a href="/feeds" class="nav-link">Feeds</a>
+                {% if current_user.role.value == 'admin' %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Admin ▾</a>
+                    <div class="dropdown-menu">
+                        <a href="/admin/accounts">Audible Accounts</a>
+                        <a href="/admin/downloads">Download Queue</a>
+                        <a href="/admin/import">Import Audiobook</a>
+                        <a href="/admin/match-books">Match Books</a>
+                        <a href="/admin/users">Users</a>
+                        <a href="/admin/settings">Server Settings</a>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">{{ current_user.email }} ▾</a>
+                    <div class="dropdown-menu">
+                        <a href="/auth/profile">Profile</a>
+                        <a href="/auth/logout">Logout</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+    {% endif %}
+
+    <main class="container">
+        {% include "_messages.html" %}
+        {% block content %}{% endblock %}
+    </main>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

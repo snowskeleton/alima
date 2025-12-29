@@ -1,0 +1,331 @@
+"""Service for syncing library from Audible API."""
+
+import logging
+from datetime import datetime
+from pathlib import Path
+
+import audible
+import httpx
+from sqlalchemy.orm import Session
+
+from ..config import settings
+from ..models import AudibleAccount, Book, BookSource, DownloadQueue, DownloadStatus, MetadataSource
+
+logger = logging.getLogger(__name__)
+
+
+class AudibleSyncService:
+    """Service for syncing Audible library to database."""
+
+    def __init__(self, db: Session):
+        """Initialize sync service."""
+        self.db = db
+
+    def sync_account(self, account: AudibleAccount) -> dict:
+        """
+        Sync library for a single Audible account.
+
+        Args:
+            account: AudibleAccount to sync
+
+        Returns:
+            Dictionary with sync statistics
+        """
+        logger.info(f"Starting sync for account: {account.username}")
+
+        try:
+            # Load authenticator from file
+            auth_file = settings.audible_auth_path / account.auth_file_path
+            if not auth_file.exists():
+                raise FileNotFoundError(f"Auth file not found: {auth_file}")
+
+            auth = audible.Authenticator.from_file(str(auth_file))
+            client = audible.Client(auth)
+
+            # Fetch library from Audible
+            library = client.get(
+                "library",
+                params={
+                    "response_groups": "contributors, media, product_desc, series, product_extended_attrs, product_attrs",
+                    "num_results": 999,
+                    "page": 1,
+                },
+            )
+
+            if library is None:
+                raise ValueError("Failed to fetch library from Audible API")
+
+            items = library.get("items") or []
+            logger.info(f"Found {len(items)} books in library")
+
+            stats = {
+                "total": len(items),
+                "new": 0,
+                "updated": 0,
+                "queued": 0,
+            }
+
+            for item in items:
+                asin = item.get("asin")
+                if not asin:
+                    continue
+
+                # Check if book already exists
+                existing_book = (
+                    self.db.query(Book).filter(Book.asin == asin).first()
+                )
+
+                if existing_book:
+                    # Update metadata if changed
+                    if self._update_book_metadata(existing_book, item, account):
+                        stats["updated"] += 1
+                    # Download cover if missing
+                    if not existing_book.cover_image_path:
+                        self._download_cover_image(existing_book, item)
+                else:
+                    # Create new book entry
+                    book = self._create_book_from_item(item, account)
+                    self.db.add(book)
+                    self.db.flush()  # Get book ID
+                    # Download cover image
+                    self._download_cover_image(book, item)
+                    stats["new"] += 1
+
+                    # Add to download queue if not already downloaded and downloads are enabled
+                    # Check both account-level and book-level download flags
+                    if not book.file_path and account.downloads_enabled and book.download_enabled:
+                        queue_entry = DownloadQueue(
+                            book_id=book.id,
+                            audible_account_id=account.id,
+                            asin=asin,
+                            priority=0,
+                            status=DownloadStatus.PENDING,
+                            attempts=0,
+                        )
+                        self.db.add(queue_entry)
+                        stats["queued"] += 1
+
+            # Update last sync timestamp
+            account.last_sync_timestamp = datetime.utcnow()
+            self.db.commit()
+
+            logger.info(
+                f"Sync complete for {account.username}: "
+                f"{stats['new']} new, {stats['updated']} updated, "
+                f"{stats['queued']} queued for download"
+            )
+
+            return stats
+
+        except Exception as e:
+            logger.error(f"Error syncing account {account.username}: {e}")
+            self.db.rollback()
+            raise
+
+    def sync_all_accounts(self) -> dict:
+        """
+        Sync library for all enabled Audible accounts.
+
+        Returns:
+            Dictionary with overall sync statistics
+        """
+        accounts = (
+            self.db.query(AudibleAccount).filter(AudibleAccount.enabled == True).all()
+        )
+
+        logger.info(f"Syncing {len(accounts)} enabled accounts")
+
+        overall_stats = {
+            "accounts_synced": 0,
+            "accounts_failed": 0,
+            "total_books": 0,
+            "new_books": 0,
+            "updated_books": 0,
+            "queued_downloads": 0,
+        }
+
+        for account in accounts:
+            try:
+                stats = self.sync_account(account)
+                overall_stats["accounts_synced"] += 1
+                overall_stats["total_books"] += stats["total"]
+                overall_stats["new_books"] += stats["new"]
+                overall_stats["updated_books"] += stats["updated"]
+                overall_stats["queued_downloads"] += stats["queued"]
+            except Exception as e:
+                logger.error(f"Failed to sync account {account.username}: {e}")
+                overall_stats["accounts_failed"] += 1
+
+        return overall_stats
+
+    def _create_book_from_item(
+        self, item: dict, account: AudibleAccount
+    ) -> Book:
+        """
+        Create a Book model from Audible API item.
+
+        Args:
+            item: Book data from Audible API
+            account: AudibleAccount this book belongs to
+
+        Returns:
+            Book model instance
+        """
+        # Extract metadata
+        title = item.get("title", "Unknown Title")
+        subtitle = item.get("subtitle")
+
+        # Authors
+        authors = item.get("authors") or []
+        author_str = ", ".join([a.get("name", "") for a in authors]) if authors else None
+
+        # Narrators
+        narrators = item.get("narrators") or []
+        narrator_str = (
+            ", ".join([n.get("name", "") for n in narrators]) if narrators else None
+        )
+
+        # Series
+        series_info = item.get("series") or []
+        series = None
+        series_position = None
+        if series_info:
+            series = series_info[0].get("title")
+            series_position = series_info[0].get("sequence")
+
+        # Other metadata
+        description = item.get("publisher_summary")
+        publisher = item.get("publisher_name")
+
+        # Parse release date
+        publish_date = None
+        release_date_str = item.get("release_date")
+        if release_date_str:
+            try:
+                publish_date = datetime.fromisoformat(release_date_str.replace("Z", "+00:00"))
+            except Exception:
+                pass
+
+        # Duration in seconds
+        duration_seconds = item.get("runtime_length_min")
+        if duration_seconds:
+            duration_seconds = int(duration_seconds) * 60  # Convert minutes to seconds
+
+        # Genres/categories
+        genres_list = []
+        category_ladders = item.get("category_ladders") or []
+        for ladder in category_ladders:
+            ladder_items = ladder.get("ladder") or []
+            for cat in ladder_items:
+                name = cat.get("name")
+                if name and name not in genres_list:
+                    genres_list.append(name)
+
+        book = Book(
+            asin=item.get("asin"),
+            audible_account_id=account.id,
+            source=BookSource.AUDIBLE,
+            title=title,
+            subtitle=subtitle,
+            author=author_str,
+            narrator=narrator_str,
+            series=series,
+            series_position=series_position,
+            description=description,
+            publisher=publisher,
+            publish_date=publish_date,
+            duration_seconds=duration_seconds,
+            genres=genres_list if genres_list else None,
+            metadata_source=MetadataSource.AUDIBLE,
+            synced_from_master=False,
+        )
+
+        return book
+
+    def _update_book_metadata(
+        self, book: Book, item: dict, account: AudibleAccount
+    ) -> bool:
+        """
+        Update book metadata from Audible API item.
+
+        Args:
+            book: Existing Book model
+            item: Book data from Audible API
+            account: AudibleAccount this book belongs to
+
+        Returns:
+            True if book was updated, False otherwise
+        """
+        # Only update if metadata source is Audible and no manual overrides
+        if book.metadata_source != MetadataSource.AUDIBLE or book.metadata_override:
+            return False
+
+        updated = False
+
+        # Check if title changed
+        new_title = item.get("title", "Unknown Title")
+        if book.title != new_title:
+            book.title = new_title
+            updated = True
+
+        # Update last_metadata_update if changed
+        if updated:
+            book.last_metadata_update = datetime.utcnow()
+            book.last_modified = datetime.utcnow()
+
+        return updated
+
+    def _download_cover_image(self, book: Book, item: dict) -> None:
+        """
+        Download cover image from Audible API.
+
+        Args:
+            book: Book model to update with cover image path
+            item: Book data from Audible API
+        """
+        try:
+            # Get product images from API response
+            product_images = item.get("product_images")
+            if not product_images:
+                logger.debug(f"No product images found for {book.title}")
+                return
+
+            # Try to get 500px image (standard size)
+            image_url = product_images.get("500")
+            if not image_url:
+                # Fallback to any available size
+                image_url = next(iter(product_images.values()), None)
+
+            if not image_url:
+                logger.debug(f"No image URL found for {book.title}")
+                return
+
+            # Ensure covers directory exists
+            settings.covers_path.mkdir(parents=True, exist_ok=True)
+
+            # Download image
+            response = httpx.get(image_url, follow_redirects=True, timeout=30.0)
+            response.raise_for_status()
+
+            # Determine file extension from content type
+            content_type = response.headers.get("content-type", "")
+            ext = ".jpg"  # Default to jpg
+            if "png" in content_type:
+                ext = ".png"
+            elif "webp" in content_type:
+                ext = ".webp"
+
+            # Generate filename using ASIN
+            cover_filename = f"{book.asin}{ext}"
+            cover_path = settings.covers_path / cover_filename
+
+            # Save image
+            with open(cover_path, "wb") as f:
+                f.write(response.content)
+
+            # Update book record with relative path
+            book.cover_image_path = f"covers/{cover_filename}"
+            logger.info(f"Downloaded cover for {book.title}: {cover_filename}")
+
+        except Exception as e:
+            logger.error(f"Failed to download cover for {book.title}: {e}")

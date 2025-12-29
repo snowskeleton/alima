@@ -1,0 +1,582 @@
+{% extends "base.html" %}
+
+{% block title %}Match Books - Alima{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Book Matching</h1>
+    <p>Match audiobook files from your collection to library entries</p>
+</div>
+
+<div class="instructions">
+    <p><strong>Instructions:</strong> Place audiobook files (.m4a, .m4b, .mp3) in <code>data/audiobooks/unassigned/</code></p>
+    <p>Files will be automatically matched to books in your library that haven't been downloaded yet.</p>
+</div>
+
+<!-- Controls -->
+<div class="controls-section">
+    <form method="GET" action="/admin/match-books" id="thresholdForm" class="threshold-control">
+        <label for="threshold">Confidence Threshold:</label>
+        <input
+            type="range"
+            id="threshold"
+            name="threshold"
+            min="50"
+            max="100"
+            value="{{ threshold }}"
+            step="5"
+            oninput="document.getElementById('thresholdValue').textContent = this.value + '%'"
+        />
+        <span id="thresholdValue">{{ threshold }}%</span>
+        <button type="submit" class="btn-apply">Apply</button>
+    </form>
+
+    {% if matched_files %}
+    <form method="POST" action="/admin/match-books/batch-confirm" style="display: inline;">
+        <input type="hidden" name="threshold" value="{{ threshold }}">
+        <button type="submit" class="btn-batch" onclick="return confirm('Confirm all {{ matched_files|length }} auto-matched file(s)?')">
+            Confirm All Auto-Matched ({{ matched_files|length }})
+        </button>
+    </form>
+    {% endif %}
+</div>
+
+<!-- Auto-Matched Files -->
+{% if matched_files %}
+<div class="section-card">
+    <h2>Auto-Matched Files (≥ {{ threshold }}% confidence)</h2>
+    <p class="section-description">These files have been automatically matched to books. Review and confirm each match.</p>
+
+    <table class="match-table">
+        <thead>
+            <tr>
+                <th>File Info</th>
+                <th>Matched Book</th>
+                <th>Confidence</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for match in matched_files %}
+            <tr>
+                <td class="file-info">
+                    <div class="filename">{{ match.filename }}</div>
+                    <details class="metadata-details">
+                        <summary>Show metadata</summary>
+                        <div class="metadata-content">
+                            <div><strong>Title:</strong> {{ match.metadata.get('title', 'N/A') }}</div>
+                            <div><strong>Author:</strong> {{ match.metadata.get('author', 'N/A') }}</div>
+                            <div><strong>Narrator:</strong> {{ match.metadata.get('narrator', 'N/A') }}</div>
+                            {% if match.metadata.get('duration_seconds') %}
+                            <div><strong>Duration:</strong>
+                                {{ (match.metadata.duration_seconds // 3600)|int }}h
+                                {{ ((match.metadata.duration_seconds % 3600) // 60)|int }}m
+                            </div>
+                            {% endif %}
+                            <div><strong>File Size:</strong> {{ "%.1f"|format(match.file_size / 1024 / 1024) }} MB</div>
+                        </div>
+                    </details>
+                </td>
+
+                <td class="matched-book">
+                    <a href="/library/{{ match.matched_book.id }}" class="book-link">
+                        {{ match.matched_book.title }}
+                    </a>
+                    {% if match.matched_book.author %}
+                    <div class="book-author">by {{ match.matched_book.author }}</div>
+                    {% endif %}
+                    {% if match.matched_book.series %}
+                    <div class="book-series">
+                        {{ match.matched_book.series }}
+                        {% if match.matched_book.series_position %}#{{ match.matched_book.series_position }}{% endif %}
+                    </div>
+                    {% endif %}
+                </td>
+
+                <td class="confidence">
+                    {% if match.confidence >= 85 %}
+                    <span class="badge badge-success">{{ "%.0f"|format(match.confidence) }}%</span>
+                    {% elif match.confidence >= 70 %}
+                    <span class="badge badge-warning">{{ "%.0f"|format(match.confidence) }}%</span>
+                    {% else %}
+                    <span class="badge badge-secondary">{{ "%.0f"|format(match.confidence) }}%</span>
+                    {% endif %}
+                </td>
+
+                <td class="actions">
+                    <form method="POST" action="/admin/match-books/{{ match.filename }}/confirm/{{ match.matched_book.id }}" class="confirm-form">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="update_metadata" value="true">
+                            Update metadata
+                        </label>
+                        <button type="submit" class="btn-confirm">Confirm Match</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- Unmatched Files -->
+{% if unmatched_files %}
+<div class="section-card">
+    <h2>Manual Matching Required (< {{ threshold }}% confidence)</h2>
+    <p class="section-description">These files need manual review. Select a book to match or import as new.</p>
+
+    <table class="match-table">
+        <thead>
+            <tr>
+                <th>File Info</th>
+                <th>Manual Selection</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for file in unmatched_files %}
+            <tr>
+                <td class="file-info">
+                    <div class="filename">{{ file.filename }}</div>
+                    <details class="metadata-details">
+                        <summary>Show metadata</summary>
+                        <div class="metadata-content">
+                            <div><strong>Title:</strong> {{ file.metadata.get('title', 'N/A') }}</div>
+                            <div><strong>Author:</strong> {{ file.metadata.get('author', 'N/A') }}</div>
+                            <div><strong>Narrator:</strong> {{ file.metadata.get('narrator', 'N/A') }}</div>
+                            {% if file.metadata.get('series') %}
+                            <div><strong>Series:</strong> {{ file.metadata.series }}</div>
+                            {% endif %}
+                            {% if file.metadata.get('duration_seconds') %}
+                            <div><strong>Duration:</strong>
+                                {{ (file.metadata.duration_seconds // 3600)|int }}h
+                                {{ ((file.metadata.duration_seconds % 3600) // 60)|int }}m
+                            </div>
+                            {% endif %}
+                            <div><strong>File Size:</strong> {{ "%.1f"|format(file.file_size / 1024 / 1024) }} MB</div>
+                        </div>
+                    </details>
+
+                    {% if file.get('suggested_book') %}
+                    <div class="suggestion">
+                        <span class="suggestion-label">Best match:</span>
+                        <a href="/library/{{ file.suggested_book.id }}">{{ file.suggested_book.title }}</a>
+                        <span class="badge badge-secondary">{{ "%.0f"|format(file.confidence) }}%</span>
+                    </div>
+                    {% endif %}
+                </td>
+
+                <td class="manual-selection">
+                    <form method="POST" action="/admin/match-books/{{ file.filename }}/confirm/{book_id}" class="manual-form" id="form-{{ loop.index }}">
+                        <select name="book_id" class="book-select" required onchange="updateFormAction(this, {{ loop.index }})">
+                            <option value="">Select existing book...</option>
+                            {% for book in available_books %}
+                            <option value="{{ book.id }}"
+                                {% if file.get('suggested_book') and file.suggested_book.id == book.id %}selected{% endif %}>
+                                {{ book.title }}{% if book.author %} - {{ book.author }}{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="update_metadata" value="true">
+                            Update metadata
+                        </label>
+                    </form>
+                </td>
+
+                <td class="actions">
+                    <button type="submit" form="form-{{ loop.index }}" class="btn-match">Match to Selected</button>
+                    <span class="or-label">OR</span>
+                    <form method="POST" action="/admin/match-books/{{ file.filename }}/import-new" style="display: inline;">
+                        <button type="submit" class="btn-import">Import as New</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- Empty State -->
+{% if not matched_files and not unmatched_files %}
+<div class="empty-state">
+    <p>No files found in <code>data/audiobooks/unassigned/</code></p>
+    <p>Place audiobook files in that directory and refresh this page.</p>
+    <a href="/admin/import" class="btn-secondary">Or import files directly →</a>
+</div>
+{% endif %}
+
+<script>
+function updateFormAction(select, formIndex) {
+    const form = document.getElementById('form-' + formIndex);
+    const bookId = select.value;
+    if (bookId) {
+        // Extract filename from current form action
+        const currentAction = form.action;
+        const parts = currentAction.split('/');
+        const filename = parts[parts.length - 3]; // Get filename part
+        form.action = `/admin/match-books/${filename}/confirm/${bookId}`;
+    }
+}
+</script>
+
+<style>
+.page-header {
+    margin-bottom: 1.5rem;
+}
+
+.page-header h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem 0;
+}
+
+.page-header p {
+    color: #6b7280;
+    margin: 0;
+}
+
+.instructions {
+    background: #f0f9ff;
+    border: 1px solid #0ea5e9;
+    border-radius: 4px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.instructions p {
+    margin: 0.25rem 0;
+}
+
+.instructions code {
+    background: #e0f2fe;
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 0.875rem;
+}
+
+.controls-section {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: #f9fafb;
+    border-radius: 4px;
+}
+
+.threshold-control {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex: 1;
+}
+
+.threshold-control label {
+    font-weight: 500;
+    color: #374151;
+}
+
+.threshold-control input[type="range"] {
+    flex: 1;
+    max-width: 300px;
+}
+
+#thresholdValue {
+    min-width: 50px;
+    font-weight: 600;
+    color: #059669;
+}
+
+.btn-apply,
+.btn-batch {
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.btn-apply {
+    background: #3b82f6;
+    color: white;
+}
+
+.btn-apply:hover {
+    background: #2563eb;
+}
+
+.btn-batch {
+    background: #10b981;
+    color: white;
+}
+
+.btn-batch:hover {
+    background: #059669;
+}
+
+.section-card {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.section-card h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem 0;
+}
+
+.section-description {
+    color: #6b7280;
+    margin: 0 0 1rem 0;
+    font-size: 0.875rem;
+}
+
+.match-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.match-table thead {
+    background: #f9fafb;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+.match-table th {
+    padding: 0.75rem;
+    text-align: left;
+    font-weight: 500;
+    color: #6b7280;
+}
+
+.match-table td {
+    padding: 1rem 0.75rem;
+    border-bottom: 1px solid #f3f4f6;
+    vertical-align: top;
+}
+
+.match-table tbody tr:hover {
+    background: #fafbfc;
+}
+
+.file-info .filename {
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+    color: #1f2937;
+}
+
+.metadata-details {
+    margin-top: 0.5rem;
+}
+
+.metadata-details summary {
+    cursor: pointer;
+    color: #3b82f6;
+    font-size: 0.8125rem;
+    user-select: none;
+}
+
+.metadata-details summary:hover {
+    text-decoration: underline;
+}
+
+.metadata-content {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: #f9fafb;
+    border-radius: 3px;
+    font-size: 0.8125rem;
+}
+
+.metadata-content div {
+    margin: 0.25rem 0;
+}
+
+.matched-book .book-link {
+    color: #1f2937;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.matched-book .book-link:hover {
+    color: #3b82f6;
+    text-decoration: underline;
+}
+
+.book-author,
+.book-series {
+    font-size: 0.8125rem;
+    color: #6b7280;
+    margin-top: 0.25rem;
+}
+
+.confidence {
+    text-align: center;
+}
+
+.badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 1rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.badge-success {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.badge-warning {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.badge-secondary {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.actions {
+    min-width: 200px;
+}
+
+.confirm-form,
+.manual-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.8125rem;
+    color: #6b7280;
+    cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+    cursor: pointer;
+}
+
+.btn-confirm,
+.btn-match,
+.btn-import {
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.btn-confirm {
+    background: #10b981;
+    color: white;
+}
+
+.btn-confirm:hover {
+    background: #059669;
+}
+
+.btn-match {
+    background: #3b82f6;
+    color: white;
+}
+
+.btn-match:hover {
+    background: #2563eb;
+}
+
+.btn-import {
+    background: #6b7280;
+    color: white;
+}
+
+.btn-import:hover {
+    background: #4b5563;
+}
+
+.manual-selection .book-select {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 0.875rem;
+}
+
+.or-label {
+    display: inline-block;
+    margin: 0 0.5rem;
+    color: #9ca3af;
+    font-size: 0.8125rem;
+}
+
+.suggestion {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: #fef3c7;
+    border-radius: 3px;
+    font-size: 0.8125rem;
+}
+
+.suggestion-label {
+    font-weight: 500;
+    color: #92400e;
+}
+
+.suggestion a {
+    color: #92400e;
+    text-decoration: none;
+}
+
+.suggestion a:hover {
+    text-decoration: underline;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+}
+
+.empty-state p {
+    margin: 0.5rem 0;
+    color: #6b7280;
+}
+
+.empty-state code {
+    background: #f3f4f6;
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    font-family: monospace;
+}
+
+.btn-secondary {
+    display: inline-block;
+    margin-top: 1rem;
+    padding: 0.5rem 1rem;
+    background: #6b7280;
+    color: white;
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 0.875rem;
+}
+
+.btn-secondary:hover {
+    background: #4b5563;
+}
+</style>
+{% endblock %}

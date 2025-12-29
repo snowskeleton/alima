@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Create Feed - Alima{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Create RSS Feed</h1>
+</div>
+
+<form action="/feeds/create" method="POST">
+    <div class="form-group">
+        <label class="form-label">Feed Name</label>
+        <input type="text" name="name" class="form-input" required>
+    </div>
+
+    <div class="form-group">
+        <label class="form-label">Description</label>
+        <textarea name="description" class="form-input" rows="3"></textarea>
+    </div>
+
+    <div class="form-group">
+        <label class="form-label">Feed Type</label>
+        <select name="feed_type" id="feedType" class="form-input" required onchange="toggleFilterOptions()">
+            <option value="smart">Smart Feed (Automatic)</option>
+            <option value="manual">Manual Feed</option>
+        </select>
+    </div>
+
+    <div id="filterOptions" class="form-group">
+        <label class="form-label">Filter By</label>
+        <select name="filter_type" class="form-input">
+            <option value="">Select filter type...</option>
+            <option value="author">Author</option>
+            <option value="series">Series</option>
+            <option value="narrator">Narrator</option>
+            <option value="genre">Genre</option>
+        </select>
+    </div>
+
+    <div id="filterValue" class="form-group">
+        <label class="form-label">Filter Value</label>
+        <input type="text" name="filter_value" class="form-input" placeholder="e.g. Brandon Sanderson">
+    </div>
+
+    <div class="form-group">
+        <label class="checkbox-label">
+            <input type="checkbox" name="is_public" value="true" checked>
+            Make feed public (accessible via RSS URL)
+        </label>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Create Feed</button>
+        <a href="/feeds" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+
+<script>
+function toggleFilterOptions() {
+    const feedType = document.getElementById('feedType').value;
+    const filterOptions = document.getElementById('filterOptions');
+    const filterValue = document.getElementById('filterValue');
+
+    if (feedType === 'smart') {
+        filterOptions.style.display = 'block';
+        filterValue.style.display = 'block';
+    } else {
+        filterOptions.style.display = 'none';
+        filterValue.style.display = 'none';
+    }
+}
+
+// Initialize on page load
+toggleFilterOptions();
+</script>
+{% endblock %}

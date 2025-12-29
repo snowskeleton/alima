@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accept Invite - Alima</title>
+    <style>
+        :root {
+            --primary-color: #007bff;
+            --secondary-color: #6c757d;
+            --border-color: #dee2e6;
+            --success-color: #28a745;
+            --error-color: #dc3545;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .invite-container {
+            background: white;
+            border-radius: 0.5rem;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            max-width: 450px;
+            width: 100%;
+            padding: 2rem;
+        }
+
+        .invite-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .invite-header h1 {
+            font-size: 2rem;
+            color: #333;
+            margin-bottom: 0.5rem;
+        }
+
+        .invite-header p {
+            color: var(--secondary-color);
+        }
+
+        .invite-info {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 0.25rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .invite-info p {
+            margin-bottom: 0.5rem;
+        }
+
+        .invite-info p:last-child {
+            margin-bottom: 0;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #333;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.25rem;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        .form-help {
+            display: block;
+            font-size: 0.875rem;
+            color: var(--secondary-color);
+            margin-top: 0.25rem;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 0.75rem;
+            border: none;
+            border-radius: 0.25rem;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 0.75rem;
+            border-radius: 0.25rem;
+            margin-bottom: 1rem;
+            border: 1px solid #f5c6cb;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .badge-primary {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .badge-secondary {
+            background: var(--secondary-color);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="invite-container">
+        <div class="invite-header">
+            <h1>Welcome to Alima!</h1>
+            <p>Create your account</p>
+        </div>
+
+        <div class="invite-info">
+            <p><strong>Email:</strong> {{ invite.email }}</p>
+            <p><strong>Role:</strong>
+                <span class="badge {% if invite.role.value == 'admin' %}badge-primary{% else %}badge-secondary{% endif %}">
+                    {{ invite.role.value }}
+                </span>
+            </p>
+            <p><strong>Invited by:</strong> {{ invite.created_by.email }}</p>
+        </div>
+
+        {% if error %}
+        <div class="error-message">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <form action="/auth/accept-invite" method="POST">
+            <input type="hidden" name="token" value="{{ token }}">
+
+            <div class="form-group">
+                <label for="password" class="form-label">Password</label>
+                <input
+                    type="password"
+                    id="password"
+                    name="password"
+                    class="form-input"
+                    required
+                    minlength="8"
+                    autofocus
+                >
+                <small class="form-help">Minimum 8 characters</small>
+            </div>
+
+            <div class="form-group">
+                <label for="password_confirm" class="form-label">Confirm Password</label>
+                <input
+                    type="password"
+                    id="password_confirm"
+                    name="password_confirm"
+                    class="form-input"
+                    required
+                    minlength="8"
+                >
+            </div>
+
+            <button type="submit" class="btn btn-primary">Create Account</button>
+        </form>
+    </div>
+</body>
+</html>

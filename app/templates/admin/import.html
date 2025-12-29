@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Import Audiobook - Alima{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Import Audiobook</h1>
+    <p>Upload a third-party audiobook file (.m4a, .m4b, or .mp3)</p>
+</div>
+
+<form action="/admin/import/upload" method="POST" enctype="multipart/form-data">
+    <div class="form-group">
+        <label class="form-label">Audio File *</label>
+        <input type="file" name="audio_file" class="form-input" accept=".m4a,.m4b,.mp3" required>
+        <small class="form-help">Supported formats: .m4a, .m4b, .mp3</small>
+    </div>
+
+    <div class="form-group">
+        <label class="checkbox-label">
+            <input type="checkbox" name="extract_metadata" value="true" checked>
+            Extract metadata from file
+        </label>
+        <small class="form-help">Uncheck to manually enter all metadata</small>
+    </div>
+
+    <h3>Metadata (Optional - Override Extracted)</h3>
+
+    <div class="form-group">
+        <label class="form-label">Title</label>
+        <input type="text" name="title" class="form-input">
+    </div>
+
+    <div class="form-group">
+        <label class="form-label">Author</label>
+        <input type="text" name="author" class="form-input">
+    </div>
+
+    <div class="form-group">
+        <label class="form-label">Narrator</label>
+        <input type="text" name="narrator" class="form-input">
+    </div>
+
+    <div class="form-group">
+        <label class="form-label">Series</label>
+        <input type="text" name="series" class="form-input">
+    </div>
+
+    <div class="form-group">
+        <label class="form-label">Series Position</label>
+        <input type="text" name="series_position" class="form-input" placeholder="e.g. 1, 2, 3">
+    </div>
+
+    <div class="form-group">
+        <label class="form-label">Description</label>
+        <textarea name="description" class="form-input" rows="4"></textarea>
+    </div>
+
+    <div class="form-group">
+        <label class="form-label">Publisher</label>
+        <input type="text" name="publisher" class="form-input">
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Import Audiobook</button>
+        <a href="/library" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}
