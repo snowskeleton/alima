@@ -19,7 +19,7 @@ cp .env.docker .env
 
 # 2. Edit .env and set SECRET_KEY
 # Generate with: openssl rand -hex 32
-nano .env
+vi .env
 
 # 3. Create data directories
 mkdir -p data/{audiobooks/unassigned,covers,audible_auth,temp,db}
