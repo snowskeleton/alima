@@ -25,14 +25,7 @@
             <div class="form-group">
                 <label class="form-label">Auth File (.json)</label>
                 <input type="file" name="auth_file" class="form-input" accept=".json" required>
-                <small class="form-help">Upload your Audible authentication file</small>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label">Activation Bytes</label>
-                <input type="text" name="activation_bytes" class="form-input"
-                       pattern="[0-9a-fA-F]{8}" maxlength="8" required>
-                <small class="form-help">8 hex characters (e.g., 12345678)</small>
+                <small class="form-help">Upload your Audible authentication file (activation bytes will be extracted automatically)</small>
             </div>
 
             <div class="form-group">
@@ -123,8 +116,7 @@
 {% else %}
 <div class="empty-state">
     <p>No Audible accounts configured yet.</p>
-    <p class="text-muted">Use the CLI to add your first account:</p>
-    <code>./venv/bin/python cli.py import-account --username myaccount --auth-file myaccount.json --activation-bytes 12345678</code>
+    <p class="text-muted">Click the buttons above to add your first account.</p>
 </div>
 {% endif %}
 

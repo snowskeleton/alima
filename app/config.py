@@ -24,21 +24,8 @@ class Settings(BaseSettings):
     audible_auth_path: Path = Path("/app/data/audible_auth")
     temp_path: Path = Path("/app/data/temp")
 
-    # Email (optional)
-    smtp_host: str | None = None
-    smtp_port: int = 587
-    smtp_user: str | None = None
-    smtp_password: str | None = None
-    smtp_from: str | None = None
-
-    # Sync Settings
-    sync_interval_hours: int = 6
-    download_quality: Literal["High", "Normal"] = "High"
-    max_concurrent_downloads: int = 3
-
-    # Session
-    session_expire_hours: int = 12410  # 365 days
-    invite_expire_days: int = 7
+    # Note: Email, sync, and session settings should be configured via
+    # Admin → Server Settings. These are not read from .env.
 
     # Replication Mode
     replication_mode: Literal["standalone", "master", "slave"] = "standalone"

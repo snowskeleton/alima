@@ -220,12 +220,13 @@ async def list_accounts(
 async def add_account(
     username: str = Form(...),
     auth_file: UploadFile = File(...),
-    activation_bytes: str = Form(...),
     marketplace: str = Form(...),
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Add a new Audible account via web form."""
+    import json
+
     # Check if account already exists
     existing = (
         db.query(AudibleAccount)
@@ -238,6 +239,25 @@ async def add_account(
             detail=f"Account with username '{username}' already exists",
         )
 
+    # Read the uploaded file content
+    content = await auth_file.read()
+
+    # Parse JSON to extract activation_bytes
+    try:
+        auth_data = json.loads(content)
+        activation_bytes = auth_data.get("activation_bytes")
+
+        if not activation_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Auth file does not contain activation_bytes. Please ensure this is a valid Audible auth file.",
+            )
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON file. Please upload a valid Audible auth file.",
+        )
+
     # Ensure auth directory exists
     settings.audible_auth_path.mkdir(parents=True, exist_ok=True)
 
@@ -246,7 +266,6 @@ async def add_account(
     auth_file_path = settings.audible_auth_path / auth_filename
 
     with open(auth_file_path, "wb") as f:
-        content = await auth_file.read()
         f.write(content)
 
     # Create new account

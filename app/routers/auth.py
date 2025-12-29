@@ -88,6 +88,17 @@ async def register(
     # Create session token
     token = create_access_token(data={"sub": user.email, "user_id": user.id})
 
+    # Get session expiration from database settings (with hardcoded default)
+    session_expire_hours = 168  # Default: 7 days
+    try:
+        from ..services.settings_service import SettingsService
+        settings_service = SettingsService(db)
+        db_expire = settings_service.get("session_expire_hours")
+        if db_expire:
+            session_expire_hours = int(db_expire)
+    except Exception:
+        pass  # Use hardcoded default
+
     # Set HTTP-only cookie and redirect
     redirect_response = RedirectResponse(
         url="/library", status_code=status.HTTP_303_SEE_OTHER
@@ -96,7 +107,7 @@ async def register(
         key="session_token",
         value=token,
         httponly=True,
-        max_age=settings.session_expire_hours * 3600,
+        max_age=session_expire_hours * 3600,
         samesite="lax",
     )
 
@@ -155,6 +166,17 @@ async def login(
     # Create session token
     token = create_access_token(data={"sub": user.email, "user_id": user.id})
 
+    # Get session expiration from database settings (with hardcoded default)
+    session_expire_hours = 168  # Default: 7 days
+    try:
+        from ..services.settings_service import SettingsService
+        settings_service = SettingsService(db)
+        db_expire = settings_service.get("session_expire_hours")
+        if db_expire:
+            session_expire_hours = int(db_expire)
+    except Exception:
+        pass  # Use hardcoded default
+
     # Set HTTP-only cookie
     redirect_url = next if next else "/library"
     redirect_response = RedirectResponse(
@@ -164,7 +186,7 @@ async def login(
         key="session_token",
         value=token,
         httponly=True,
-        max_age=settings.session_expire_hours * 3600,
+        max_age=session_expire_hours * 3600,
         samesite="lax",
     )
 
@@ -266,6 +288,17 @@ async def accept_invite(
     # Create session token
     token = create_access_token(data={"sub": user.email, "user_id": user.id})
 
+    # Get session expiration from database settings (with hardcoded default)
+    session_expire_hours = 168  # Default: 7 days
+    try:
+        from ..services.settings_service import SettingsService
+        settings_service = SettingsService(db)
+        db_expire = settings_service.get("session_expire_hours")
+        if db_expire:
+            session_expire_hours = int(db_expire)
+    except Exception:
+        pass  # Use hardcoded default
+
     # Set HTTP-only cookie and redirect
     redirect_response = RedirectResponse(
         url="/library", status_code=status.HTTP_303_SEE_OTHER
@@ -274,7 +307,7 @@ async def accept_invite(
         key="session_token",
         value=token,
         httponly=True,
-        max_age=settings.session_expire_hours * 3600,
+        max_age=session_expire_hours * 3600,
         samesite="lax",
     )
 

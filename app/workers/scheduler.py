@@ -54,8 +54,8 @@ def start_scheduler():
         logger.warning("Scheduler is already running")
         return
 
-    # Get sync interval from database settings (with fallback to config)
-    sync_interval_hours = settings.sync_interval_hours
+    # Get sync interval from database settings (with hardcoded default)
+    sync_interval_hours = 6  # Default: 6 hours
     try:
         from ..services.settings_service import SettingsService
         db = SessionLocal()
@@ -65,7 +65,7 @@ def start_scheduler():
             sync_interval_hours = int(db_interval)
         db.close()
     except Exception as e:
-        logger.warning(f"Failed to load sync interval from database, using config: {e}")
+        logger.warning(f"Failed to load sync interval from database, using default: {e}")
 
     # Add library sync job (runs every N hours based on settings)
     scheduler.add_job(

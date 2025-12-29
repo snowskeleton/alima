@@ -63,6 +63,8 @@ class SettingsService:
         """
         Get a setting value by key.
 
+        Priority: Database setting > Config file > Provided default
+
         Args:
             key: Setting key
             default: Default value if not found
@@ -73,6 +75,10 @@ class SettingsService:
         setting = self.db.query(ServerSettings).filter(ServerSettings.key == key).first()
 
         if not setting or setting.value is None:
+            # Try to get from config file as fallback
+            config_value = self._get_config_value(key)
+            if config_value is not None:
+                return str(config_value)
             return default
 
         if setting.is_encrypted:
@@ -80,9 +86,43 @@ class SettingsService:
                 return self._decrypt(setting.value)
             except Exception as e:
                 logger.error(f"Failed to decrypt setting {key}: {e}")
+                # Try config fallback on decryption error
+                config_value = self._get_config_value(key)
+                if config_value is not None:
+                    return str(config_value)
                 return default
 
         return setting.value
+
+    def _get_config_value(self, key: str) -> Optional[Any]:
+        """
+        Get a value from the config file or provide hardcoded defaults.
+
+        Only domain is read from config - all other settings use hardcoded defaults.
+
+        Args:
+            key: Setting key
+
+        Returns:
+            Config value or hardcoded default
+        """
+        # Only domain comes from config
+        if key == "domain":
+            return app_settings.domain
+
+        # All other settings have hardcoded defaults
+        # These are the defaults if not set in Server Settings UI
+        defaults = {
+            "app_name": "Alima",
+            "sync_interval_hours": 6,
+            "download_quality": "High",
+            "max_concurrent_downloads": 3,
+            "session_expire_hours": 168,  # 7 days
+            "invite_expire_days": 7,
+            "smtp_port": 587,
+        }
+
+        return defaults.get(key)
 
     def set(
         self,

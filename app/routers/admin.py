@@ -68,13 +68,23 @@ async def send_invite(
     # Generate invite token
     invite_token = generate_invite_token()
 
+    # Get invite expiration from database settings (with hardcoded default)
+    invite_expire_days = 7  # Default: 7 days
+    try:
+        settings_service = SettingsService(db)
+        db_expire = settings_service.get("invite_expire_days")
+        if db_expire:
+            invite_expire_days = int(db_expire)
+    except Exception:
+        pass  # Use hardcoded default if DB not available
+
     # Create invite
     invite = Invite(
         email=email,
         token=invite_token,
         role=UserRole(role),
         created_by=current_user.id,
-        expires_at=datetime.utcnow() + timedelta(days=settings.invite_expire_days),
+        expires_at=datetime.utcnow() + timedelta(days=invite_expire_days),
     )
     db.add(invite)
     db.commit()

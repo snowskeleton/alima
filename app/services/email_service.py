@@ -29,32 +29,32 @@ class EmailService:
             db = SessionLocal()
             settings_service = SettingsService(db)
 
-            # Load SMTP settings from database
-            self.smtp_host = settings_service.get("smtp_host") or settings.smtp_host
-            self.smtp_port = int(settings_service.get("smtp_port") or settings.smtp_port or 587)
-            self.smtp_username = settings_service.get("smtp_username") or settings.smtp_user
-            self.smtp_password = settings_service.get("smtp_password") or settings.smtp_password
-            self.smtp_from_email = settings_service.get("smtp_from_email") or settings.smtp_from
+            # Load SMTP settings from database (with hardcoded defaults)
+            self.smtp_host = settings_service.get("smtp_host")
+            self.smtp_port = int(settings_service.get("smtp_port") or 587)
+            self.smtp_username = settings_service.get("smtp_username")
+            self.smtp_password = settings_service.get("smtp_password")
+            self.smtp_from_email = settings_service.get("smtp_from_email")
             self.smtp_from_name = settings_service.get("smtp_from_name") or settings.app_name
 
             # Load general settings
             self.app_name = settings_service.get("app_name") or settings.app_name
             self.domain = settings_service.get("domain") or settings.domain
-            self.invite_expire_days = int(settings_service.get("invite_expire_days") or settings.invite_expire_days or 7)
+            self.invite_expire_days = int(settings_service.get("invite_expire_days") or 7)
 
             db.close()
         except Exception as e:
-            logger.warning(f"Failed to load settings from database, using config: {e}")
-            # Fallback to config
-            self.smtp_host = settings.smtp_host
-            self.smtp_port = settings.smtp_port
-            self.smtp_username = settings.smtp_user
-            self.smtp_password = settings.smtp_password
-            self.smtp_from_email = settings.smtp_from
+            logger.warning(f"Failed to load settings from database, using defaults: {e}")
+            # Fallback to hardcoded defaults
+            self.smtp_host = None
+            self.smtp_port = 587
+            self.smtp_username = None
+            self.smtp_password = None
+            self.smtp_from_email = None
             self.smtp_from_name = settings.app_name
             self.app_name = settings.app_name
             self.domain = settings.domain
-            self.invite_expire_days = settings.invite_expire_days
+            self.invite_expire_days = 7
 
     async def send_invite_email(
         self, recipient_email: str, invite_token: str, invited_by: str
@@ -198,11 +198,11 @@ If you didn't expect this invitation, you can safely ignore this email.
         try:
             settings_service = SettingsService(db)
             domain = SettingsService.get_domain(db)
-            smtp_host = settings_service.get("smtp_host") or settings.smtp_host
-            smtp_from = settings_service.get("smtp_from_email") or settings.smtp_from
-            smtp_port = int(settings_service.get("smtp_port") or settings.smtp_port or 587)
-            smtp_username = settings_service.get("smtp_username") or settings.smtp_user
-            smtp_password = settings_service.get("smtp_password") or settings.smtp_password
+            smtp_host = settings_service.get("smtp_host")
+            smtp_from = settings_service.get("smtp_from_email")
+            smtp_port = int(settings_service.get("smtp_port") or 587)
+            smtp_username = settings_service.get("smtp_username")
+            smtp_password = settings_service.get("smtp_password")
             smtp_from_name = settings_service.get("smtp_from_name") or settings.app_name
             app_name = settings_service.get("app_name") or settings.app_name
         finally:

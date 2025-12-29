@@ -90,8 +90,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        # Get session expiration from database settings (with fallback to config)
-        session_expire_hours = settings.session_expire_hours
+        # Get session expiration from settings (with hardcoded default)
+        session_expire_hours = 168  # Default: 7 days
         try:
             from .services.settings_service import SettingsService
             from .database import SessionLocal
@@ -102,7 +102,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
                 session_expire_hours = int(db_expire)
             db.close()
         except Exception:
-            pass  # Silently fall back to config
+            pass  # Use hardcoded default if DB not available
 
         expire = datetime.utcnow() + timedelta(hours=session_expire_hours)
 

@@ -39,9 +39,9 @@ class BookDownloadService:
         Returns:
             Dictionary with download statistics
         """
-        # Get max concurrent from database settings (with fallback to config)
+        # Get max concurrent from database settings (with hardcoded default)
         if max_concurrent is None:
-            max_concurrent = settings.max_concurrent_downloads
+            max_concurrent = 3  # Default: 3 concurrent downloads
             try:
                 from ..services.settings_service import SettingsService
                 settings_service = SettingsService(self.db)
@@ -49,7 +49,7 @@ class BookDownloadService:
                 if db_concurrent:
                     max_concurrent = int(db_concurrent)
             except Exception:
-                pass  # Silently fall back to config
+                pass  # Silently fall back to hardcoded default
 
         # Get pending downloads ordered by priority (higher first)
         query = (
@@ -194,8 +194,8 @@ class BookDownloadService:
                 f"(exists: {auth_file.exists()})"
             )
 
-            # Get download quality from database settings (with fallback to config)
-            download_quality = settings.download_quality
+            # Get download quality from database settings (with hardcoded default)
+            download_quality = "High"  # Default: High quality
             try:
                 from ..services.settings_service import SettingsService
                 settings_service = SettingsService(self.db)
@@ -203,7 +203,7 @@ class BookDownloadService:
                 if db_quality:
                     download_quality = db_quality
             except Exception:
-                pass  # Silently fall back to config
+                pass  # Silently fall back to hardcoded default
 
             # Request license
             logger.info(f"Requesting license for {queue_entry.asin}")
