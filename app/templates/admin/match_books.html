@@ -166,6 +166,7 @@ function populateMatched(matches) {
 
     matches.forEach(match => {
         const tr = document.createElement('tr');
+        tr.dataset.filename = match.filename;
 
         // File info
         const fileInfo = document.createElement('td');
@@ -202,15 +203,23 @@ function populateMatched(matches) {
         // Actions
         const actions = document.createElement('td');
         actions.className = 'actions';
-        actions.innerHTML = `
-            <form method="POST" action="/admin/match-books/${encodeURIComponent(match.filename)}/confirm/${match.matched_book.id}" class="confirm-form">
-                <label class="checkbox-label">
-                    <input type="checkbox" name="update_metadata" value="true">
-                    Update metadata
-                </label>
-                <button type="submit" class="btn-confirm">Confirm Match</button>
-            </form>
+        const form = document.createElement('form');
+        form.className = 'confirm-form';
+        form.innerHTML = `
+            <label class="checkbox-label">
+                <input type="checkbox" name="update_metadata" value="false">
+                Update metadata
+            </label>
+            <button type="submit" class="btn-confirm">Confirm Match</button>
         `;
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const updateMetadata = form.querySelector('input[name="update_metadata"]').checked;
+            await submitMatch(match.filename, match.matched_book.id, updateMetadata, tr);
+        });
+
+        actions.appendChild(form);
 
         tr.appendChild(fileInfo);
         tr.appendChild(bookInfo);
@@ -226,7 +235,9 @@ function populateUnmatched(files) {
 
     files.forEach((file, index) => {
         const tr = document.createElement('tr');
-        const formId = `form-${index}`;
+        tr.dataset.filename = file.filename;
+        const searchId = `search-${index}`;
+        const resultsId = `results-${index}`;
 
         // File info
         const fileInfo = document.createElement('td');
@@ -257,46 +268,67 @@ function populateUnmatched(files) {
             ${suggestedHtml}
         `;
 
-        // Manual selection
+        // Manual selection with autocomplete
         const selection = document.createElement('td');
         selection.className = 'manual-selection';
-        let options = '<option value="">Select existing book...</option>';
-        let initialBookId = '';
-        availableBooks.forEach(book => {
-            const selected = file.suggested_book && file.suggested_book.id === book.id ? 'selected' : '';
-            if (selected) {
-                initialBookId = book.id;
-            }
-            options += `<option value="${book.id}" ${selected}>${escapeHtml(book.title)}${book.author ? ' - ' + escapeHtml(book.author) : ''}</option>`;
-        });
 
-        // Set proper initial action if book is pre-selected
-        const initialAction = initialBookId
-            ? `/admin/match-books/${encodeURIComponent(file.filename)}/confirm/${initialBookId}`
-            : '#';
+        const initialValue = file.suggested_book ? `${file.suggested_book.title}${file.suggested_book.author ? ' - ' + file.suggested_book.author : ''}` : '';
+        const initialBookId = file.suggested_book ? file.suggested_book.id : null;
 
         selection.innerHTML = `
-            <form method="POST" action="${initialAction}" class="manual-form" id="${formId}">
-                <select name="book_id" class="book-select" required onchange="updateFormAction(this, '${formId}', '${escapeHtml(file.filename)}')">
-                    ${options}
-                </select>
-                <label class="checkbox-label">
-                    <input type="checkbox" name="update_metadata" value="true">
-                    Update metadata
-                </label>
-            </form>
+            <div class="autocomplete-wrapper">
+                <input
+                    type="text"
+                    id="${searchId}"
+                    class="book-search"
+                    placeholder="Search for book..."
+                    value="${escapeHtml(initialValue)}"
+                    data-book-id="${initialBookId || ''}"
+                    autocomplete="off"
+                />
+                <div id="${resultsId}" class="autocomplete-results"></div>
+            </div>
+            <label class="checkbox-label">
+                <input type="checkbox" name="update_metadata" class="update-metadata-checkbox">
+                Update metadata
+            </label>
         `;
+
+        // Setup autocomplete
+        setTimeout(() => setupAutocomplete(searchId, resultsId), 0);
 
         // Actions
         const actions = document.createElement('td');
         actions.className = 'actions';
-        actions.innerHTML = `
-            <button type="submit" form="${formId}" class="btn-match">Match to Selected</button>
-            <span class="or-label">OR</span>
-            <form method="POST" action="/admin/match-books/${encodeURIComponent(file.filename)}/import-new" style="display: inline;">
-                <button type="submit" class="btn-import">Import as New</button>
-            </form>
-        `;
+
+        const matchBtn = document.createElement('button');
+        matchBtn.className = 'btn-match';
+        matchBtn.textContent = 'Match to Selected';
+        matchBtn.addEventListener('click', async () => {
+            const input = document.getElementById(searchId);
+            const bookId = input.dataset.bookId;
+            if (!bookId) {
+                alert('Please select a book from the search results');
+                return;
+            }
+            const updateMetadata = selection.querySelector('.update-metadata-checkbox').checked;
+            await submitMatch(file.filename, bookId, updateMetadata, tr);
+        });
+
+        const orLabel = document.createElement('span');
+        orLabel.className = 'or-label';
+        orLabel.textContent = 'OR';
+
+        const importBtn = document.createElement('button');
+        importBtn.className = 'btn-import';
+        importBtn.textContent = 'Import as New';
+        importBtn.addEventListener('click', async () => {
+            await importAsNew(file.filename, tr);
+        });
+
+        actions.appendChild(matchBtn);
+        actions.appendChild(orLabel);
+        actions.appendChild(importBtn);
 
         tr.appendChild(fileInfo);
         tr.appendChild(selection);
@@ -305,11 +337,112 @@ function populateUnmatched(files) {
     });
 }
 
-function updateFormAction(select, formId, filename) {
-    const form = document.getElementById(formId);
-    const bookId = select.value;
-    if (bookId) {
-        form.action = `/admin/match-books/${encodeURIComponent(filename)}/confirm/${bookId}`;
+function setupAutocomplete(searchId, resultsId) {
+    const input = document.getElementById(searchId);
+    const resultsDiv = document.getElementById(resultsId);
+
+    if (!input || !resultsDiv) return;
+
+    input.addEventListener('input', function() {
+        const query = this.value.toLowerCase().trim();
+
+        if (!query) {
+            resultsDiv.innerHTML = '';
+            resultsDiv.style.display = 'none';
+            this.dataset.bookId = '';
+            return;
+        }
+
+        // Filter books
+        const filtered = availableBooks.filter(book => {
+            const title = (book.title || '').toLowerCase();
+            const author = (book.author || '').toLowerCase();
+            return title.includes(query) || author.includes(query);
+        });
+
+        if (filtered.length === 0) {
+            resultsDiv.innerHTML = '<div class="autocomplete-item no-results">No results</div>';
+            resultsDiv.style.display = 'block';
+            this.dataset.bookId = '';
+        } else {
+            resultsDiv.innerHTML = filtered.map(book => `
+                <div class="autocomplete-item" data-book-id="${book.id}">
+                    <div class="autocomplete-title">${escapeHtml(book.title)}</div>
+                    ${book.author ? `<div class="autocomplete-author">${escapeHtml(book.author)}</div>` : ''}
+                </div>
+            `).join('');
+            resultsDiv.style.display = 'block';
+
+            // Add click handlers
+            resultsDiv.querySelectorAll('.autocomplete-item:not(.no-results)').forEach(item => {
+                item.addEventListener('click', () => {
+                    const bookId = item.dataset.bookId;
+                    const book = availableBooks.find(b => b.id == bookId);
+                    if (book) {
+                        input.value = `${book.title}${book.author ? ' - ' + book.author : ''}`;
+                        input.dataset.bookId = bookId;
+                        resultsDiv.innerHTML = '';
+                        resultsDiv.style.display = 'none';
+                    }
+                });
+            });
+        }
+    });
+
+    // Close on click outside
+    document.addEventListener('click', (e) => {
+        if (!input.contains(e.target) && !resultsDiv.contains(e.target)) {
+            resultsDiv.innerHTML = '';
+            resultsDiv.style.display = 'none';
+        }
+    });
+}
+
+async function submitMatch(filename, bookId, updateMetadata, row) {
+    try {
+        const formData = new FormData();
+        if (updateMetadata) {
+            formData.append('update_metadata', 'true');
+        }
+
+        const response = await fetch(`/admin/match-books/${encodeURIComponent(filename)}/confirm/${bookId}`, {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (response.redirected) {
+            // Success - remove the row
+            row.style.opacity = '0.5';
+            setTimeout(() => row.remove(), 300);
+        } else {
+            alert('Error confirming match. Please try again.');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error confirming match. Please try again.');
+    }
+}
+
+async function importAsNew(filename, row) {
+    if (!confirm(`Import "${filename}" as a new book?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/admin/match-books/${encodeURIComponent(filename)}/import-new`, {
+            method: 'POST',
+        });
+
+        if (response.redirected) {
+            // Success - remove the row
+            row.style.opacity = '0.5';
+            setTimeout(() => row.remove(), 300);
+        } else {
+            alert('Error importing book. Please try again.');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error importing book. Please try again.');
     }
 }
 
@@ -501,6 +634,10 @@ document.addEventListener('DOMContentLoaded', function() {
     vertical-align: top;
 }
 
+.match-table tbody tr {
+    transition: opacity 0.3s ease;
+}
+
 .match-table tbody tr:hover {
     background: #fafbfc;
 }
@@ -645,12 +782,70 @@ document.addEventListener('DOMContentLoaded', function() {
     background: #4b5563;
 }
 
-.manual-selection .book-select {
+.autocomplete-wrapper {
+    position: relative;
+    margin-bottom: 0.5rem;
+}
+
+.book-search {
     width: 100%;
     padding: 0.5rem;
     border: 1px solid #d1d5db;
     border-radius: 4px;
     font-size: 0.875rem;
+}
+
+.book-search:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.autocomplete-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 250px;
+    overflow-y: auto;
+    background: white;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    z-index: 100;
+    display: none;
+    margin-top: 2px;
+}
+
+.autocomplete-item {
+    padding: 0.75rem;
+    cursor: pointer;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+.autocomplete-item:hover:not(.no-results) {
+    background: #f9fafb;
+}
+
+.autocomplete-item.no-results {
+    color: #9ca3af;
+    cursor: default;
+    font-style: italic;
+}
+
+.autocomplete-title {
+    font-weight: 500;
+    color: #1f2937;
+    margin-bottom: 0.25rem;
+}
+
+.autocomplete-author {
+    font-size: 0.8125rem;
+    color: #6b7280;
 }
 
 .or-label {
