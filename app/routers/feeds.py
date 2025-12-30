@@ -426,6 +426,9 @@ async def unpin_feed(
 async def feed_detail_page(
     request: Request,
     slug: str,
+    search: str = None,
+    sort: str = "added_at",
+    order: str = "desc",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_optional_user),
 ):
@@ -435,6 +438,7 @@ async def feed_detail_page(
     This is a public page that shows feed information and books.
     Includes RSS auto-discovery tags for podcast apps.
     Shows navbar if user is logged in.
+    Supports searching and sorting books within the feed.
     """
     # Find feed by slug
     feed = db.query(Feed).filter(Feed.slug == slug).first()
@@ -455,9 +459,36 @@ async def feed_detail_page(
     # Get books for this feed
     from ..services.feed_generator import FeedGeneratorService
     from ..services.settings_service import SettingsService
+    from ..models import Book
 
     feed_generator = FeedGeneratorService(db)
-    books = feed_generator._get_feed_books(feed)
+    all_books = feed_generator._get_feed_books(feed)
+
+    # Get book IDs from feed books
+    book_ids = [book.id for book in all_books]
+
+    # Build query for filtering and sorting
+    query = db.query(Book).filter(Book.id.in_(book_ids))
+
+    # Apply search filter
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            (Book.title.ilike(search_term))
+            | (Book.author.ilike(search_term))
+            | (Book.series.ilike(search_term))
+            | (Book.narrator.ilike(search_term))
+        )
+
+    # Apply sorting
+    sort_column = getattr(Book, sort, Book.added_at)
+    if order == "desc":
+        query = query.order_by(sort_column.desc())
+    else:
+        query = query.order_by(sort_column.asc())
+
+    # Execute query
+    books = query.all()
 
     # Get domain from database settings (with fallback to config)
     domain = SettingsService.get_domain(db)
@@ -483,8 +514,15 @@ async def feed_detail_page(
             "current_user": current_user,
             "feed": feed,
             "books": books,
+            "total_count": len(book_ids),
+            "filtered_count": len(books),
             "rss_url": rss_url,
             "cover_url": cover_url,
             "domain": domain,
+            "filters": {
+                "search": search,
+                "sort": sort,
+                "order": order,
+            },
         },
     )

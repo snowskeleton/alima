@@ -39,7 +39,13 @@
             <p class="feed-description">{{ feed.description }}</p>
             {% endif %}
             <div class="feed-meta">
-                <span class="feed-count">{{ books|length }} episodes</span>
+                <span class="feed-count">
+                    {% if filters.search %}
+                    Showing {{ filtered_count }} of {{ total_count }} episodes
+                    {% else %}
+                    {{ total_count }} episodes
+                    {% endif %}
+                </span>
                 {% if feed.is_system %}
                 <span class="badge badge-system">System Feed</span>
                 {% endif %}
@@ -73,6 +79,35 @@
         </div>
     </div>
 
+    <!-- Search and Filter Panel -->
+    <div class="filter-panel">
+        <form method="GET" action="/feed/{{ feed.slug }}" id="filterForm" class="filter-form">
+            <input
+                type="text"
+                name="search"
+                placeholder="Search episodes by title, author, series, or narrator..."
+                value="{{ filters.search or '' }}"
+                class="filter-input search-input"
+            />
+
+            <select name="sort" class="filter-select" onchange="document.getElementById('filterForm').submit()">
+                <option value="added_at" {% if filters.sort == 'added_at' %}selected{% endif %}>Date Added</option>
+                <option value="title" {% if filters.sort == 'title' %}selected{% endif %}>Title</option>
+                <option value="author" {% if filters.sort == 'author' %}selected{% endif %}>Author</option>
+                <option value="series" {% if filters.sort == 'series' %}selected{% endif %}>Series</option>
+                <option value="duration_seconds" {% if filters.sort == 'duration_seconds' %}selected{% endif %}>Duration</option>
+            </select>
+
+            <select name="order" class="filter-select" onchange="document.getElementById('filterForm').submit()">
+                <option value="desc" {% if filters.order == 'desc' %}selected{% endif %}>↓</option>
+                <option value="asc" {% if filters.order == 'asc' %}selected{% endif %}>↑</option>
+            </select>
+
+            <button type="submit" class="btn-filter">Search</button>
+            <a href="/feed/{{ feed.slug }}" class="btn-clear">Clear</a>
+        </form>
+    </div>
+
     {% if books %}
     <div class="episodes-section">
         <h2>Episodes</h2>
@@ -103,7 +138,12 @@
     </div>
     {% else %}
     <div class="empty-state">
+        {% if filters.search %}
+        <p>No episodes found matching "{{ filters.search }}".</p>
+        <p><a href="/feed/{{ feed.slug }}">Clear search</a> to see all episodes.</p>
+        {% else %}
         <p>This feed doesn't have any episodes yet.</p>
+        {% endif %}
     </div>
     {% endif %}
 </div>
@@ -113,6 +153,92 @@
     max-width: 1200px;
     margin: 0 auto;
     padding: 2rem;
+}
+
+/* Filter Panel */
+.filter-panel {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    margin-bottom: 2rem;
+}
+
+.filter-form {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.filter-input {
+    flex: 1;
+    min-width: 200px;
+    padding: 0.625rem 1rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+}
+
+.filter-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+}
+
+.search-input {
+    min-width: 300px;
+}
+
+.filter-select {
+    padding: 0.625rem 2.5rem 0.625rem 1rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.375rem;
+    background: white;
+    font-size: 0.875rem;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1.5em 1.5em;
+}
+
+.filter-select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+}
+
+.btn-filter {
+    padding: 0.625rem 1.5rem;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-filter:hover {
+    background: #0056b3;
+}
+
+.btn-clear {
+    padding: 0.625rem 1.5rem;
+    background: #6c757d;
+    color: white;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: background 0.2s;
+}
+
+.btn-clear:hover {
+    background: #5a6268;
 }
 
 .feed-header {
@@ -391,6 +517,24 @@
 
     .episodes-grid {
         grid-template-columns: 1fr;
+    }
+
+    .filter-form {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .filter-input,
+    .search-input,
+    .filter-select {
+        width: 100%;
+        min-width: 100%;
+    }
+
+    .btn-filter,
+    .btn-clear {
+        width: 100%;
+        text-align: center;
     }
 }
 </style>
