@@ -8,10 +8,10 @@ from ..database import get_db
 from ..models import Feed
 from ..services.feed_generator import FeedGeneratorService
 
-router = APIRouter(prefix="/rss", tags=["RSS"])
+router = APIRouter(prefix="/feeds", tags=["RSS"])
 
 
-@router.get("/{slug}")
+@router.get("/{slug}.xml")
 async def get_rss_feed(slug: str, db: Session = Depends(get_db)):
     """
     Serve RSS feed by slug.
@@ -48,7 +48,7 @@ async def get_rss_feed(slug: str, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/{slug}/preview")
+@router.get("/{slug}.xml/preview")
 async def preview_rss_feed(slug: str, db: Session = Depends(get_db)):
     """
     Preview RSS feed (returns raw XML for debugging).

@@ -37,7 +37,7 @@
             <p>{{ feed.description }}</p>
             {% endif %}
             <div class="feed-actions" onclick="event.stopPropagation()">
-                <button class="btn btn-sm" onclick="copyRssUrl('{{ domain }}/rss/{{ feed.slug }}')">Copy RSS URL</button>
+                <button class="btn btn-sm" onclick="copyRssUrl('{{ domain }}/feeds/{{ feed.slug }}.xml')">Copy RSS URL</button>
                 {% if current_user.role.value == 'admin' %}
                     {% if feed.is_pinned %}
                     <button class="btn btn-sm btn-secondary" onclick="unpinFeed({{ feed.id }})">Unpin</button>

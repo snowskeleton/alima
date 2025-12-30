@@ -463,7 +463,7 @@ async def feed_detail_page(
     domain = SettingsService.get_domain(db)
 
     # Generate RSS URL
-    rss_url = f"{domain}/rss/{slug}"
+    rss_url = f"{domain}/feeds/{slug}.xml"
 
     # Get cover image URL
     cover_url = None

@@ -172,17 +172,31 @@ class FeedGeneratorService:
         """
         item = SubElement(channel, "item")
 
-        # Basic metadata
-        SubElement(item, "title").text = book.title
+        # Format title with series info
+        title = book.title
+
+        # Remove "(Unabridged)" but keep "(Abridged)" if present
+        if title.endswith("(Unabridged)"):
+            title = title[:-13].strip()
+
+        # Add series info to title if available
+        if book.series:
+            series_text = book.series
+            if book.series_position:
+                series_text += f", Book {book.series_position}"
+            title = f"{title}: {series_text}"
+
+        SubElement(item, "title").text = title
         SubElement(item, "link").text = f"{domain}/library/{book.id}"
 
         # Description
         description = book.description or f"{book.title} by {book.author}"
         SubElement(item, "description").text = description
 
-        # Author
+        # Author in itunes:subtitle tag
         if book.author:
             SubElement(item, "itunes:author").text = book.author
+            SubElement(item, "itunes:subtitle").text = book.author
 
         # Duration (if available)
         if book.duration_seconds:
@@ -192,8 +206,9 @@ class FeedGeneratorService:
             duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
             SubElement(item, "itunes:duration").text = duration_str
 
-        # Publication date
-        pub_date = book.added_at.strftime("%a, %d %b %Y %H:%M:%S +0000")
+        # Publication date - use purchased_at if available, else added_at
+        pub_date_source = book.purchased_at if book.purchased_at else book.added_at
+        pub_date = pub_date_source.strftime("%a, %d %b %Y %H:%M:%S +0000")
         SubElement(item, "pubDate").text = pub_date
 
         # GUID (unique identifier)
@@ -225,10 +240,3 @@ class FeedGeneratorService:
         if book.cover_image_path:
             image_url = f"{domain}/files/{book.cover_image_path}"
             SubElement(item, "itunes:image", href=image_url)
-
-        # Series information
-        if book.series:
-            series_text = book.series
-            if book.series_position:
-                series_text += f" #{book.series_position}"
-            SubElement(item, "itunes:subtitle").text = series_text

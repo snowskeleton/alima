@@ -237,6 +237,7 @@ class Book(Base):
     # Timestamps
     added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     downloaded_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    purchased_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_modified: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )

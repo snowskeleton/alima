@@ -363,6 +363,15 @@ class AudibleSyncService:
             except Exception:
                 pass
 
+        # Parse purchase date
+        purchased_at = None
+        purchase_date_str = item.get("purchase_date")
+        if purchase_date_str:
+            try:
+                purchased_at = datetime.fromisoformat(purchase_date_str.replace("Z", "+00:00"))
+            except Exception:
+                pass
+
         # Duration in seconds
         duration_seconds = item.get("runtime_length_min")
         if duration_seconds:
@@ -398,6 +407,7 @@ class AudibleSyncService:
             description=description,
             publisher=publisher,
             publish_date=publish_date,
+            purchased_at=purchased_at,
             duration_seconds=duration_seconds,
             cover_url=cover_url,
             genres=genres_list if genres_list else None,
@@ -440,6 +450,17 @@ class AudibleSyncService:
             if new_cover_url and book.cover_url != new_cover_url:
                 book.cover_url = new_cover_url
                 updated = True
+
+        # Update purchase date if not already set
+        if not book.purchased_at:
+            purchase_date_str = item.get("purchase_date")
+            if purchase_date_str:
+                try:
+                    purchased_at = datetime.fromisoformat(purchase_date_str.replace("Z", "+00:00"))
+                    book.purchased_at = purchased_at
+                    updated = True
+                except Exception:
+                    pass
 
         # Update last_metadata_update if changed
         if updated:
