@@ -53,11 +53,11 @@
                 </div>
                 <div class="stat-item">
                     <div class="stat-value {% if stats.reconnected > 0 %}stat-success{% endif %}">{{ stats.reconnected }}</div>
-                    <div class="stat-label">Reconnected</div>
+                    <div class="stat-label">Auto-Reconnected</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-value">{{ stats.orphaned_files - stats.reconnected }}</div>
-                    <div class="stat-label">Still Unmatched</div>
+                    <div class="stat-value {% if stats.moved_to_unassigned is defined and stats.moved_to_unassigned > 0 %}stat-warning{% endif %}">{{ stats.moved_to_unassigned|default(0) }}</div>
+                    <div class="stat-label">Moved to Unassigned</div>
                 </div>
             </div>
             {% endif %}
@@ -72,9 +72,9 @@
                 ✅ Reconnected {{ stats.reconnected }} orphaned file(s) to their books in the database.
             </p>
             {% endif %}
-            {% if stats.orphaned_files is defined and (stats.orphaned_files - stats.reconnected) > 0 %}
+            {% if stats.moved_to_unassigned is defined and stats.moved_to_unassigned > 0 %}
             <p class="integrity-note">
-                ℹ️ {{ stats.orphaned_files - stats.reconnected }} file(s) in the audiobooks directory could not be automatically matched.
+                ℹ️ {{ stats.moved_to_unassigned }} file(s) could not be automatically matched and were moved to the unassigned folder.
                 You can manually match them on the <a href="/admin/match-books">Match Books</a> page.
             </p>
             {% endif %}

@@ -1,6 +1,7 @@
 """Service for syncing library from Audible API."""
 
 import logging
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -139,6 +140,7 @@ class AudibleSyncService:
             stats["files_fixed"] = integrity_stats["fixed"]
             stats["orphaned_files"] = integrity_stats["orphaned_files"]
             stats["reconnected"] = integrity_stats["reconnected"]
+            stats["moved_to_unassigned"] = integrity_stats["moved_to_unassigned"]
 
             logger.info(
                 f"Quick sync complete for {account.username}: "
@@ -147,7 +149,8 @@ class AudibleSyncService:
                 f"{stats['covers_queued']} covers queued, "
                 f"{stats['files_verified']} files verified, "
                 f"{stats['files_missing']} missing files detected and fixed, "
-                f"{stats['reconnected']} orphaned files reconnected"
+                f"{stats['reconnected']} orphaned files reconnected, "
+                f"{stats['moved_to_unassigned']} files moved to unassigned"
             )
 
             return stats
@@ -257,6 +260,7 @@ class AudibleSyncService:
             stats["files_fixed"] = integrity_stats["fixed"]
             stats["orphaned_files"] = integrity_stats["orphaned_files"]
             stats["reconnected"] = integrity_stats["reconnected"]
+            stats["moved_to_unassigned"] = integrity_stats["moved_to_unassigned"]
 
             logger.info(
                 f"Sync complete for {account.username}: "
@@ -264,7 +268,8 @@ class AudibleSyncService:
                 f"{stats['queued']} queued for download, "
                 f"{stats['files_verified']} files verified, "
                 f"{stats['files_missing']} missing files detected and fixed, "
-                f"{stats['reconnected']} orphaned files reconnected"
+                f"{stats['reconnected']} orphaned files reconnected, "
+                f"{stats['moved_to_unassigned']} files moved to unassigned"
             )
 
             return stats
@@ -498,6 +503,7 @@ class AudibleSyncService:
             "fixed": 0,
             "orphaned_files": 0,
             "reconnected": 0,
+            "moved_to_unassigned": 0,
         }
 
         # PART 1: Check books that claim to have files
@@ -619,6 +625,26 @@ class AudibleSyncService:
 
                     # Remove from books_without_files list to avoid duplicate matching
                     books_without_files = [b for b in books_without_files if b.id != matched_book.id]
+                else:
+                    # No match found - move to unassigned directory for manual matching
+                    try:
+                        unassigned_dir = settings.audiobooks_path / "unassigned"
+                        unassigned_dir.mkdir(parents=True, exist_ok=True)
+                        dest_path = unassigned_dir / file_path.name
+
+                        # Handle filename conflicts
+                        counter = 1
+                        while dest_path.exists():
+                            stem = file_path.stem
+                            suffix = file_path.suffix
+                            dest_path = unassigned_dir / f"{stem}_{counter}{suffix}"
+                            counter += 1
+
+                        shutil.move(str(file_path), str(dest_path))
+                        stats["moved_to_unassigned"] += 1
+                        logger.info(f"Moved unmatched file '{file_path.name}' to unassigned directory")
+                    except Exception as e:
+                        logger.error(f"Failed to move unmatched file '{file_path.name}': {e}")
 
         # Commit all changes
         if stats["fixed"] > 0 or stats["reconnected"] > 0:
@@ -626,7 +652,8 @@ class AudibleSyncService:
             logger.info(
                 f"File integrity check complete: "
                 f"{stats['fixed']} missing files cleared, "
-                f"{stats['reconnected']} orphaned files reconnected"
+                f"{stats['reconnected']} orphaned files reconnected, "
+                f"{stats['moved_to_unassigned']} files moved to unassigned"
             )
 
         return stats
