@@ -356,3 +356,32 @@ async def delete_user(
     db.commit()
 
     return {"success": True, "message": f"User '{user_email}' deleted successfully"}
+
+
+@router.post("/sync/force-refresh-metadata")
+async def force_refresh_metadata(
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Force refresh all book metadata from Audible.
+    This will update ALL fields including purchase dates, even if already set.
+
+    Useful when Audible API returned incorrect data during initial sync.
+    """
+    from ..services.audible_sync import AudibleSyncService
+
+    try:
+        sync_service = AudibleSyncService(db)
+        stats = sync_service.force_refresh_all_metadata()
+
+        return {
+            "success": True,
+            "message": "Metadata refresh completed",
+            "stats": stats,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+        }

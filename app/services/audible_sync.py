@@ -309,6 +309,95 @@ class AudibleSyncService:
 
         return overall_stats
 
+    def force_refresh_all_metadata(self, account: AudibleAccount = None) -> dict:
+        """
+        Force refresh metadata for all books from Audible API.
+        This will update ALL fields including purchased_at, even if already set.
+
+        Args:
+            account: Optional specific account to refresh. If None, refreshes all accounts.
+
+        Returns:
+            Dictionary with refresh statistics
+        """
+        logger.info("Starting force metadata refresh for all books")
+
+        stats = {
+            "accounts_processed": 0,
+            "books_updated": 0,
+            "books_unchanged": 0,
+            "errors": 0,
+        }
+
+        try:
+            # Get accounts to process
+            if account:
+                accounts = [account]
+            else:
+                accounts = self.db.query(AudibleAccount).filter(AudibleAccount.enabled == True).all()
+
+            for acc in accounts:
+                logger.info(f"Force refreshing metadata for account: {acc.username}")
+                stats["accounts_processed"] += 1
+
+                # Load authenticator
+                auth_file = settings.audible_auth_path / acc.auth_file_path
+                if not auth_file.exists():
+                    logger.error(f"Auth file not found: {auth_file}")
+                    stats["errors"] += 1
+                    continue
+
+                auth = audible.Authenticator.from_file(str(auth_file))
+                client = audible.Client(auth)
+
+                # Fetch entire library (no purchased_after filter)
+                params = {
+                    "response_groups": "contributors, media, product_desc, series, product_extended_attrs, product_attrs",
+                    "num_results": 999,
+                    "page": 1,
+                }
+
+                library = client.get("1.0/library", params=params)
+                if not library or "items" not in library:
+                    logger.error(f"Failed to fetch library for {acc.username}")
+                    stats["errors"] += 1
+                    continue
+
+                items = library.get("items", [])
+                logger.info(f"Fetched {len(items)} books from Audible for {acc.username}")
+
+                # Update each book with force_update=True
+                for item in items:
+                    asin = item.get("asin")
+                    if not asin:
+                        continue
+
+                    # Find existing book
+                    existing_book = (
+                        self.db.query(Book)
+                        .filter(Book.asin == asin, Book.audible_account_id == acc.id)
+                        .first()
+                    )
+
+                    if existing_book:
+                        # Force update metadata
+                        if self._update_book_metadata(existing_book, item, acc, force_update=True):
+                            stats["books_updated"] += 1
+                        else:
+                            stats["books_unchanged"] += 1
+
+                self.db.commit()
+
+            from ..main import format_dict_pretty
+            logger.info(f"Force metadata refresh complete:{format_dict_pretty(stats)}")
+            return stats
+
+        except Exception as e:
+            logger.error(f"Error during force metadata refresh: {e}", exc_info=True)
+            self.db.rollback()
+            stats["errors"] += 1
+            raise
+
     def _create_book_from_item(
         self, item: dict, account: AudibleAccount
     ) -> Book:
@@ -412,7 +501,7 @@ class AudibleSyncService:
         return book
 
     def _update_book_metadata(
-        self, book: Book, item: dict, account: AudibleAccount
+        self, book: Book, item: dict, account: AudibleAccount, force_update: bool = False
     ) -> bool:
         """
         Update book metadata from Audible API item.
@@ -421,6 +510,7 @@ class AudibleSyncService:
             book: Existing Book model
             item: Book data from Audible API
             account: AudibleAccount this book belongs to
+            force_update: If True, update all fields even if already set
 
         Returns:
             True if book was updated, False otherwise
@@ -445,14 +535,15 @@ class AudibleSyncService:
                 book.cover_url = new_cover_url
                 updated = True
 
-        # Update purchase date if not already set
-        if not book.purchased_at:
+        # Update purchase date if not already set (or if force_update is True)
+        if not book.purchased_at or force_update:
             purchase_date_str = item.get("purchase_date")
             if purchase_date_str:
                 try:
                     purchased_at = datetime.fromisoformat(purchase_date_str.replace("Z", "+00:00"))
-                    book.purchased_at = purchased_at
-                    updated = True
+                    if book.purchased_at != purchased_at:
+                        book.purchased_at = purchased_at
+                        updated = True
                 except Exception:
                     pass
 

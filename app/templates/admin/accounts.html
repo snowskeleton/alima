@@ -12,6 +12,7 @@
     <div class="add-account-buttons">
         <button class="btn btn-primary" onclick="toggleAddForm()">+ Upload Auth File</button>
         <a href="/admin/accounts/login" class="btn btn-success">+ Login with Audible</a>
+        <button class="btn btn-info" onclick="forceRefreshMetadata()" id="forceRefreshBtn">🔄 Force Refresh All Metadata</button>
     </div>
 
     <div id="addAccountForm" class="add-account-form" style="display: none;">
@@ -295,6 +296,44 @@ function toggleAddForm() {
         form.style.display = 'block';
     } else {
         form.style.display = 'none';
+    }
+}
+
+async function forceRefreshMetadata() {
+    const btn = document.getElementById('forceRefreshBtn');
+    const originalText = btn.textContent;
+
+    if (!confirm('Force refresh all book metadata from Audible?\n\nThis will update purchase dates and other metadata for ALL books.\nThis may take a few minutes depending on your library size.')) {
+        return;
+    }
+
+    // Disable button and show loading state
+    btn.disabled = true;
+    btn.textContent = '⏳ Refreshing...';
+
+    try {
+        const response = await fetch('/admin/sync/force-refresh-metadata', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert(`✅ Metadata refresh completed!\n\nAccounts processed: ${result.stats.accounts_processed}\nBooks updated: ${result.stats.books_updated}\nBooks unchanged: ${result.stats.books_unchanged}\nErrors: ${result.stats.errors}`);
+            // Reload the page to show updated last sync times
+            window.location.reload();
+        } else {
+            alert(`❌ Error: ${result.error}`);
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    } catch (error) {
+        alert(`❌ Error: ${error.message}`);
+        btn.disabled = false;
+        btn.textContent = originalText;
     }
 }
 </script>
