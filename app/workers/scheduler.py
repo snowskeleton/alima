@@ -108,26 +108,10 @@ def start_scheduler():
         return
 
     # Get sync intervals from database settings (with hardcoded defaults)
-    quick_sync_interval_seconds = 60  # Default: 60 seconds
-    full_sync_interval_hours = 24  # Default: 24 hours (daily)
-    try:
-        from ..services.settings_service import SettingsService
-        db = SessionLocal()
-        settings_service = SettingsService(db)
+    from ..utils.settings_cache import get_cached_setting
 
-        # Quick sync interval (for checking new books)
-        db_quick_interval = settings_service.get("quick_sync_interval_seconds")
-        if db_quick_interval:
-            quick_sync_interval_seconds = int(db_quick_interval)
-
-        # Full sync interval (for complete library refresh)
-        db_full_interval = settings_service.get("full_sync_interval_hours")
-        if db_full_interval:
-            full_sync_interval_hours = int(db_full_interval)
-
-        db.close()
-    except Exception as e:
-        logger.warning(f"Failed to load sync intervals from database, using defaults: {e}")
+    quick_sync_interval_seconds = get_cached_setting("quick_sync_interval_seconds", 60, int)
+    full_sync_interval_hours = get_cached_setting("full_sync_interval_hours", 24, int)
 
     # Add quick sync job (runs frequently to check for new books)
     scheduler.add_job(

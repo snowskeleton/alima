@@ -40,10 +40,26 @@ async def serve_audiobook(
     if not file_path.is_absolute():
         file_path = settings.audiobooks_path.parent / file_path
 
+    # Security check: ensure the resolved path is within audiobooks directory
+    try:
+        file_path = file_path.resolve()
+        audiobooks_base_resolved = settings.audiobooks_path.parent.resolve()
+
+        if not str(file_path).startswith(str(audiobooks_base_resolved)):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied",
+            )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file path",
+        )
+
     if not file_path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Audio file not found: {file_path}",
+            detail=f"Audio file not found",
         )
 
     # Determine media type

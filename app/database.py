@@ -8,12 +8,21 @@ from sqlalchemy.orm import Session, sessionmaker
 from .config import settings
 from .models import Base
 
-# Create engine
+# Create engine with proper connection pooling
+# With 4 Gunicorn workers + scheduler threads + download threads:
+# - Base: 10 connections per worker
+# - Overflow: 5 additional connections under load
+# - Total max per worker: 15 connections
+# - Total potential across 4 workers: 60 connections (safe margin under PostgreSQL default of 100)
 engine = create_engine(
     settings.database_url,
     echo=False,
     # echo=settings.environment == "development",
     pool_pre_ping=True,  # Verify connections before using
+    pool_size=10,        # Base connections per worker
+    max_overflow=5,      # Extra connections under load
+    pool_recycle=3600,   # Recycle connections hourly (prevents stale connections)
+    pool_timeout=30,     # Wait up to 30s for connection
 )
 
 # Create session factory

@@ -3,7 +3,7 @@
 import logging
 from typing import Optional
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from .config import settings
@@ -42,8 +42,11 @@ class LeaderElection:
             return True
 
         try:
-            # Create separate raw connection (not from pool)
-            engine = create_engine(settings.database_url, pool_pre_ping=True)
+            # Import main engine (avoid circular import)
+            from .database import engine
+
+            # Get connection from main application pool
+            # Note: This connection must be held for the app's lifetime to maintain the lock
             cls._lock_connection = engine.connect()
 
             # Try to acquire advisory lock (non-blocking)
@@ -55,10 +58,13 @@ class LeaderElection:
             cls._is_leader = bool(result)
 
             if cls._is_leader:
-                logger.info(f"Worker {os.getpid()} acquired leader lock")
+                logger.info(
+                    f"Worker {os.getpid()} acquired leader lock "
+                    f"(connection will be held for app lifetime)"
+                )
             else:
                 logger.info(f"Worker {os.getpid()} is follower (lock held by another worker)")
-                # Close connection if not leader
+                # Close connection if not leader (return to pool)
                 cls._lock_connection.close()
                 cls._lock_connection = None
 

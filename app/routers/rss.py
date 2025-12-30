@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
 from ..models import Feed
@@ -18,8 +18,13 @@ async def get_rss_feed(slug: str, db: Session = Depends(get_db)):
 
     This is the public endpoint that podcast apps will subscribe to.
     """
-    # Find feed by slug
-    feed = db.query(Feed).filter(Feed.slug == slug).first()
+    # Find feed by slug with eager loading to prevent N+1 queries
+    feed = (
+        db.query(Feed)
+        .options(joinedload(Feed.feed_books).joinedload("book"))
+        .filter(Feed.slug == slug)
+        .first()
+    )
 
     if not feed:
         raise HTTPException(
@@ -55,8 +60,13 @@ async def preview_rss_feed(slug: str, db: Session = Depends(get_db)):
 
     This endpoint is accessible regardless of public/private status.
     """
-    # Find feed by slug
-    feed = db.query(Feed).filter(Feed.slug == slug).first()
+    # Find feed by slug with eager loading to prevent N+1 queries
+    feed = (
+        db.query(Feed)
+        .options(joinedload(Feed.feed_books).joinedload("book"))
+        .filter(Feed.slug == slug)
+        .first()
+    )
 
     if not feed:
         raise HTTPException(

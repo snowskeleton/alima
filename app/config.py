@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,8 +16,20 @@ class Settings(BaseSettings):
     domain: str = "http://localhost:8000"
     environment: str = "development"
 
+    @field_validator("secret_key")
+    @classmethod
+    def validate_secret_key(cls, v: str) -> str:
+        """Ensure SECRET_KEY is set and meets minimum security requirements."""
+        if not v or len(v) < 32:
+            raise ValueError(
+                "SECRET_KEY must be at least 32 characters long. "
+                "Set the SECRET_KEY environment variable with a strong random key. "
+                "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+            )
+        return v
+
     # Database
-    database_url: str = "postgresql://alima:changeme@postgres:5432/alima"
+    database_url: str = "postgresql+psycopg://alima:changeme@postgres:5432/alima"
 
     # Paths
     audiobooks_path: Path = Path("/app/data/audiobooks")

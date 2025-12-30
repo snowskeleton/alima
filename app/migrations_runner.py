@@ -443,6 +443,176 @@ def run_migration_012_fix_lowercase_download_types(db: Session, engine) -> None:
         raise
 
 
+def run_migration_013_add_indexes_and_cascades(db: Session, engine) -> None:
+    """
+    Migration 013: Add database indexes and foreign key cascades.
+
+    Changes:
+    - Add indexes on: file_path, audible_account_id, status, source, synced_from_master
+    - Add CASCADE/SET NULL to foreign key constraints
+    """
+    migration_name = "013_add_indexes_and_cascades"
+
+    if is_migration_applied(db, migration_name):
+        logger.info(f"Migration {migration_name} already applied, skipping")
+        return
+
+    logger.info(f"Running migration {migration_name}...")
+
+    try:
+        is_postgresql = engine.url.drivername.startswith("postgresql")
+
+        if is_postgresql:
+            # PostgreSQL: Add indexes
+            logger.info("Adding database indexes...")
+
+            # Check and add indexes if they don't exist
+            indexes_to_add = [
+                ("CREATE INDEX IF NOT EXISTS idx_books_file_path ON books(file_path)", "books.file_path"),
+                ("CREATE INDEX IF NOT EXISTS idx_books_audible_account_id ON books(audible_account_id)", "books.audible_account_id"),
+                ("CREATE INDEX IF NOT EXISTS idx_books_source ON books(source)", "books.source"),
+                ("CREATE INDEX IF NOT EXISTS idx_books_synced_from_master ON books(synced_from_master)", "books.synced_from_master"),
+                ("CREATE INDEX IF NOT EXISTS idx_download_queue_status ON download_queue(status)", "download_queue.status"),
+            ]
+
+            for sql, index_name in indexes_to_add:
+                try:
+                    db.execute(text(sql))
+                    logger.info(f"  ✓ Added index on {index_name}")
+                except Exception as e:
+                    logger.warning(f"  ⚠ Failed to add index on {index_name}: {e}")
+
+            db.commit()
+
+            # PostgreSQL: Update foreign key constraints
+            # Note: This is complex - we need to drop and recreate constraints
+            logger.info("Updating foreign key constraints with CASCADE behavior...")
+
+            fk_updates = [
+                # Invites: created_by -> users.id (CASCADE)
+                {
+                    "table": "invites",
+                    "constraint": "invites_created_by_fkey",
+                    "column": "created_by",
+                    "ref_table": "users",
+                    "ref_column": "id",
+                    "action": "CASCADE"
+                },
+                # Books: audible_account_id -> audible_accounts.id (SET NULL)
+                {
+                    "table": "books",
+                    "constraint": "books_audible_account_id_fkey",
+                    "column": "audible_account_id",
+                    "ref_table": "audible_accounts",
+                    "ref_column": "id",
+                    "action": "SET NULL"
+                },
+                # Feeds: user_id -> users.id (SET NULL)
+                {
+                    "table": "feeds",
+                    "constraint": "feeds_user_id_fkey",
+                    "column": "user_id",
+                    "ref_table": "users",
+                    "ref_column": "id",
+                    "action": "SET NULL"
+                },
+                # FeedBooks: feed_id -> feeds.id (CASCADE)
+                {
+                    "table": "feed_books",
+                    "constraint": "feed_books_feed_id_fkey",
+                    "column": "feed_id",
+                    "ref_table": "feeds",
+                    "ref_column": "id",
+                    "action": "CASCADE"
+                },
+                # FeedBooks: book_id -> books.id (CASCADE)
+                {
+                    "table": "feed_books",
+                    "constraint": "feed_books_book_id_fkey",
+                    "column": "book_id",
+                    "ref_table": "books",
+                    "ref_column": "id",
+                    "action": "CASCADE"
+                },
+                # DownloadQueue: book_id -> books.id (CASCADE)
+                {
+                    "table": "download_queue",
+                    "constraint": "download_queue_book_id_fkey",
+                    "column": "book_id",
+                    "ref_table": "books",
+                    "ref_column": "id",
+                    "action": "CASCADE"
+                },
+                # DownloadQueue: audible_account_id -> audible_accounts.id (CASCADE)
+                {
+                    "table": "download_queue",
+                    "constraint": "download_queue_audible_account_id_fkey",
+                    "column": "audible_account_id",
+                    "ref_table": "audible_accounts",
+                    "ref_column": "id",
+                    "action": "CASCADE"
+                },
+            ]
+
+            for fk in fk_updates:
+                try:
+                    # Drop old constraint
+                    db.execute(text(f"""
+                        ALTER TABLE {fk['table']}
+                        DROP CONSTRAINT IF EXISTS {fk['constraint']}
+                    """))
+
+                    # Add new constraint with CASCADE/SET NULL
+                    db.execute(text(f"""
+                        ALTER TABLE {fk['table']}
+                        ADD CONSTRAINT {fk['constraint']}
+                        FOREIGN KEY ({fk['column']})
+                        REFERENCES {fk['ref_table']}({fk['ref_column']})
+                        ON DELETE {fk['action']}
+                    """))
+
+                    logger.info(f"  ✓ Updated {fk['table']}.{fk['column']} -> {fk['action']}")
+                except Exception as e:
+                    logger.warning(f"  ⚠ Failed to update FK {fk['table']}.{fk['column']}: {e}")
+
+            db.commit()
+
+        else:
+            # SQLite: Add indexes
+            logger.info("Adding database indexes (SQLite)...")
+
+            indexes_to_add = [
+                ("CREATE INDEX IF NOT EXISTS idx_books_file_path ON books(file_path)", "books.file_path"),
+                ("CREATE INDEX IF NOT EXISTS idx_books_audible_account_id ON books(audible_account_id)", "books.audible_account_id"),
+                ("CREATE INDEX IF NOT EXISTS idx_books_source ON books(source)", "books.source"),
+                ("CREATE INDEX IF NOT EXISTS idx_books_synced_from_master ON books(synced_from_master)", "books.synced_from_master"),
+                ("CREATE INDEX IF NOT EXISTS idx_download_queue_status ON download_queue(status)", "download_queue.status"),
+            ]
+
+            for sql, index_name in indexes_to_add:
+                try:
+                    db.execute(text(sql))
+                    logger.info(f"  ✓ Added index on {index_name}")
+                except Exception as e:
+                    logger.warning(f"  ⚠ Failed to add index on {index_name}: {e}")
+
+            db.commit()
+
+            # SQLite: Cannot modify foreign key constraints on existing tables
+            # They must be recreated, which is complex and risky
+            # Log a warning but continue
+            logger.warning("SQLite detected: Foreign key CASCADE updates require table recreation")
+            logger.warning("Skipping FK updates for SQLite (will be applied on next table recreation)")
+
+        mark_migration_applied(db, migration_name)
+        logger.info(f"Migration {migration_name} completed successfully!")
+
+    except Exception as e:
+        logger.error(f"Migration {migration_name} failed: {e}", exc_info=True)
+        db.rollback()
+        raise
+
+
 def run_all_pending_migrations(db: Session) -> None:
     """Run all pending migrations in order."""
     from .database import engine
@@ -459,6 +629,7 @@ def run_all_pending_migrations(db: Session) -> None:
         run_migration_010_add_purchased_at,
         run_migration_011_fix_download_type_enum,
         run_migration_012_fix_lowercase_download_types,
+        run_migration_013_add_indexes_and_cascades,
     ]
 
     for migration_func in migrations:

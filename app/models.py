@@ -134,7 +134,7 @@ class Invite(Base):
     email: Mapped[str] = mapped_column(String(255))
     token: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.USER)
-    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
+    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     used: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -193,10 +193,10 @@ class Book(Base):
         String(32), unique=True, nullable=True, index=True
     )
     audible_account_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("audible_accounts.id"), nullable=True
+        Integer, ForeignKey("audible_accounts.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    source: Mapped[BookSource] = mapped_column(Enum(BookSource))
-    file_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    source: Mapped[BookSource] = mapped_column(Enum(BookSource), index=True)
+    file_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True, index=True)
     file_size: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     file_format: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     download_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -228,7 +228,7 @@ class Book(Base):
     )
 
     # Replication fields
-    synced_from_master: Mapped[bool] = mapped_column(Boolean, default=False)
+    synced_from_master: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     master_book_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     last_replicated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
@@ -260,7 +260,7 @@ class Feed(Base):
     __tablename__ = "feeds"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     feed_type: Mapped[FeedType] = mapped_column(Enum(FeedType))
@@ -290,8 +290,8 @@ class FeedBook(Base):
     __tablename__ = "feed_books"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    feed_id: Mapped[int] = mapped_column(Integer, ForeignKey("feeds.id"))
-    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id"))
+    feed_id: Mapped[int] = mapped_column(Integer, ForeignKey("feeds.id", ondelete="CASCADE"))
+    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id", ondelete="CASCADE"))
     position: Mapped[int] = mapped_column(Integer, default=0)
     added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -306,9 +306,9 @@ class DownloadQueue(Base):
     __tablename__ = "download_queue"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id"))
+    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id", ondelete="CASCADE"))
     audible_account_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("audible_accounts.id")
+        Integer, ForeignKey("audible_accounts.id", ondelete="CASCADE")
     )
     asin: Mapped[str] = mapped_column(String(32))
     download_type: Mapped[DownloadType] = mapped_column(
@@ -316,7 +316,7 @@ class DownloadQueue(Base):
     )
     priority: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[DownloadStatus] = mapped_column(
-        Enum(DownloadStatus), default=DownloadStatus.PENDING
+        Enum(DownloadStatus), default=DownloadStatus.PENDING, index=True
     )
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)

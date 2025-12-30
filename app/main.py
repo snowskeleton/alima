@@ -59,12 +59,19 @@ logger = logging.getLogger(__name__)
 
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette_csrf import CSRFMiddleware
 
 from .config import settings
 from .database import get_db, init_db
+
+# Rate limiter instance
+limiter = Limiter(key_func=get_remote_address)
 
 
 class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
@@ -201,6 +208,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Add rate limiter to app state
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 
 # Exception handler for authentication redirects
 from .dependencies import UnauthenticatedException
@@ -245,6 +256,16 @@ app.add_middleware(
     max_age=7 * 24 * 60 * 60,  # 7 days
     same_site="lax",
     https_only=settings.domain.startswith("https://"),
+)
+
+# Add CSRF protection for state-changing operations
+app.add_middleware(
+    CSRFMiddleware,
+    secret=settings.secret_key,
+    cookie_name="alima_csrf",
+    cookie_secure=settings.domain.startswith("https://"),
+    cookie_samesite="lax",
+    exempt_urls=["/health"],  # Health check doesn't need CSRF
 )
 
 # Force HTTPS URLs when DOMAIN is set to HTTPS

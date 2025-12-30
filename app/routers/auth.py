@@ -5,6 +5,8 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from ..auth import (
@@ -21,6 +23,20 @@ from ..models import Invite, User
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 templates = Jinja2Templates(directory="app/templates")
+
+# Rate limiter for authentication endpoints
+limiter = Limiter(key_func=get_remote_address)
+
+
+def get_session_expiration_hours() -> int:
+    """
+    Get session expiration time in hours from settings with caching.
+
+    Returns:
+        Session expiration time in hours (default: 168 hours = 7 days)
+    """
+    from ..utils.settings_cache import get_cached_setting
+    return get_cached_setting("session_expire_hours", 168, int)
 
 
 @router.get("/register", response_class=HTMLResponse)
@@ -53,6 +69,7 @@ async def register_page(
 
 
 @router.post("/register")
+@limiter.limit("5/hour")  # Allow 5 registration attempts per hour
 async def register(
     request: Request,
     response: Response,
@@ -88,18 +105,9 @@ async def register(
     # Create session token
     token = create_access_token(data={"sub": user.email, "user_id": user.id})
 
-    # Get session expiration from database settings (with hardcoded default)
-    session_expire_hours = 168  # Default: 7 days
-    try:
-        from ..services.settings_service import SettingsService
-        settings_service = SettingsService(db)
-        db_expire = settings_service.get("session_expire_hours")
-        if db_expire:
-            session_expire_hours = int(db_expire)
-    except Exception:
-        pass  # Use hardcoded default
+    # Set HTTP-only cookie with configured expiration
+    session_expire_hours = get_session_expiration_hours()
 
-    # Set HTTP-only cookie and redirect
     redirect_response = RedirectResponse(
         url="/library", status_code=status.HTTP_303_SEE_OTHER
     )
@@ -145,7 +153,9 @@ async def login_page(
 
 
 @router.post("/login")
+@limiter.limit("10/minute")  # Allow 10 login attempts per minute
 async def login(
+    request: Request,
     response: Response,
     email: str = Form(...),
     password: str = Form(...),
@@ -288,18 +298,9 @@ async def accept_invite(
     # Create session token
     token = create_access_token(data={"sub": user.email, "user_id": user.id})
 
-    # Get session expiration from database settings (with hardcoded default)
-    session_expire_hours = 168  # Default: 7 days
-    try:
-        from ..services.settings_service import SettingsService
-        settings_service = SettingsService(db)
-        db_expire = settings_service.get("session_expire_hours")
-        if db_expire:
-            session_expire_hours = int(db_expire)
-    except Exception:
-        pass  # Use hardcoded default
+    # Set HTTP-only cookie with configured expiration
+    session_expire_hours = get_session_expiration_hours()
 
-    # Set HTTP-only cookie and redirect
     redirect_response = RedirectResponse(
         url="/library", status_code=status.HTTP_303_SEE_OTHER
     )
@@ -333,6 +334,7 @@ async def profile_page(
 
 
 @router.post("/change-password")
+@limiter.limit("5/hour")  # Allow 5 password change attempts per hour
 async def change_password(
     request: Request,
     current_password: str = Form(...),
@@ -415,6 +417,7 @@ async def reset_password_page(
 
 
 @router.post("/reset-password")
+@limiter.limit("5/hour")  # Allow 5 password reset attempts per hour
 async def reset_password(
     request: Request,
     token: str = Form(...),
