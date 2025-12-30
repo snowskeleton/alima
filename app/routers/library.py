@@ -383,6 +383,85 @@ async def delete_book(
     )
 
 
+@router.post("/{book_id}/unmatch")
+async def unmatch_book_file(
+    request: Request,
+    book_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Move the file back to unassigned folder and unmatch it from the book."""
+    from pathlib import Path
+    from ..utils.flash import flash
+    from ..config import settings
+    import shutil
+
+    book = db.query(Book).filter(Book.id == book_id).first()
+
+    if not book:
+        flash(request, "Book not found", "error")
+        return RedirectResponse(
+            url="/library",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    if not book.file_path:
+        flash(request, "No file to unmatch", "error")
+        return RedirectResponse(
+            url=f"/library/{book_id}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    book_title = book.title
+
+    # Get the current file path
+    file_path = Path(book.file_path)
+    if not file_path.is_absolute():
+        file_path = settings.audiobooks_path / file_path
+
+    # Get the filename
+    filename = file_path.name
+
+    # Define the unassigned directory
+    unassigned_dir = settings.audiobooks_path / "unassigned"
+    unassigned_dir.mkdir(parents=True, exist_ok=True)
+
+    # Define the destination path
+    dest_path = unassigned_dir / filename
+
+    # Move the file if it exists
+    if file_path.exists():
+        try:
+            shutil.move(str(file_path), str(dest_path))
+        except Exception as e:
+            flash(request, f"Error moving file: {e}", "error")
+            return RedirectResponse(
+                url=f"/library/{book_id}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+    else:
+        flash(request, "File not found on disk, but database will be updated", "warning")
+
+    # Clear file-related fields
+    book.file_path = None
+    book.file_size = None
+    book.file_format = None
+    book.downloaded_at = None
+
+    # Re-enable downloads if it's from Audible
+    if book.source.value == "audible":
+        book.download_enabled = True
+
+    db.commit()
+
+    flash(request, f"File '{filename}' moved to unassigned folder. You can now match it to a different book.", "success")
+
+    return RedirectResponse(
+        url=f"/library/{book_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @router.get("/api/books/{book_id}", response_model=BookResponse)
 async def get_book_api(
     book_id: int,

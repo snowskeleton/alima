@@ -84,6 +84,13 @@
                 {% endif %}
             </div>
 
+            {% if book.file_path %}
+            <div class="metadata-item">
+                <strong>File Name:</strong>
+                <span class="filename-display">{{ book.file_path.split('/')[-1] }}</span>
+            </div>
+            {% endif %}
+
             {% if book.file_size %}
             <div class="metadata-item">
                 <strong>File Size:</strong>
@@ -184,6 +191,15 @@
                     {% else %}
                     ✅ Enable Auto-Download
                     {% endif %}
+                </button>
+            </form>
+            {% endif %}
+
+            <!-- Unmatch file button -->
+            {% if book.file_path %}
+            <form action="/library/{{ book.id }}/unmatch" method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to unmatch this file? The file will be moved back to the unassigned folder so you can match it to a different book.');">
+                <button type="submit" class="btn btn-warning">
+                    🔄 Unmatch File
                 </button>
             </form>
             {% endif %}
@@ -296,6 +312,15 @@
     font-size: 0.875rem;
     color: var(--secondary-color);
     margin-bottom: 0.25rem;
+}
+
+.filename-display {
+    font-family: monospace;
+    background: #f3f4f6;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    word-break: break-all;
 }
 
 .genres {
