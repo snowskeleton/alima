@@ -51,6 +51,18 @@ class FeedGeneratorService:
         SubElement(channel, "description").text = feed.description or feed.name
         SubElement(channel, "language").text = "en-us"
 
+        # Add lastBuildDate so consumers can see when feed was generated
+        from datetime import datetime, timezone
+        build_date = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+        SubElement(channel, "lastBuildDate").text = build_date
+
+        # Add pubDate based on most recent book (if any)
+        if books:
+            most_recent_book = books[0]
+            pub_date_source = most_recent_book.purchased_at if most_recent_book.purchased_at else most_recent_book.added_at
+            channel_pub_date = pub_date_source.strftime("%a, %d %b %Y %H:%M:%S +0000")
+            SubElement(channel, "pubDate").text = channel_pub_date
+
         # iTunes-specific tags
         SubElement(channel, "itunes:author").text = settings.app_name
         SubElement(channel, "itunes:summary").text = feed.description or feed.name
