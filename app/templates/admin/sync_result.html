@@ -28,6 +28,32 @@
             </div>
         </div>
 
+        {% if stats.files_verified is defined %}
+        <div class="integrity-section">
+            <h2>File Integrity Check</h2>
+            <div class="stats-grid integrity-grid">
+                <div class="stat-item">
+                    <div class="stat-value">{{ stats.files_verified }}</div>
+                    <div class="stat-label">Files Checked</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value {% if stats.files_missing > 0 %}stat-warning{% endif %}">{{ stats.files_missing }}</div>
+                    <div class="stat-label">Missing Files</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value {% if stats.files_fixed > 0 %}stat-success{% endif %}">{{ stats.files_fixed }}</div>
+                    <div class="stat-label">Fixed</div>
+                </div>
+            </div>
+            {% if stats.files_missing > 0 %}
+            <p class="integrity-note">
+                ℹ️ Missing files have been detected and the database has been updated.
+                Downloads have been re-enabled for affected Audible books.
+            </p>
+            {% endif %}
+        </div>
+        {% endif %}
+
         <div class="action-buttons">
             <a href="/admin/accounts" class="btn btn-primary">Back to Accounts</a>
             <a href="/library" class="btn btn-secondary">View Library</a>
@@ -114,6 +140,40 @@
 .action-buttons .btn {
     flex: 1;
     max-width: 200px;
+}
+
+.integrity-section {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 2px solid #e9ecef;
+}
+
+.integrity-section h2 {
+    font-size: 1.25rem;
+    color: #333;
+    margin-bottom: 1rem;
+}
+
+.integrity-grid {
+    margin: 1rem 0;
+}
+
+.stat-warning {
+    color: #f59e0b;
+}
+
+.stat-success {
+    color: #28a745;
+}
+
+.integrity-note {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 4px;
+    color: #856404;
+    font-size: 0.9rem;
 }
 </style>
 {% endblock %}

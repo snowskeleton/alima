@@ -131,11 +131,20 @@ class AudibleSyncService:
             account.last_sync_timestamp = datetime.utcnow()
             self.db.commit()
 
+            # Verify file integrity for all books
+            logger.info("Verifying file integrity for all books...")
+            integrity_stats = self._verify_file_integrity()
+            stats["files_verified"] = integrity_stats["verified"]
+            stats["files_missing"] = integrity_stats["missing"]
+            stats["files_fixed"] = integrity_stats["fixed"]
+
             logger.info(
                 f"Quick sync complete for {account.username}: "
                 f"{stats['new']} new, {stats['updated']} updated, "
                 f"{stats['queued']} queued for download, "
-                f"{stats['covers_queued']} covers queued"
+                f"{stats['covers_queued']} covers queued, "
+                f"{stats['files_verified']} files verified, "
+                f"{stats['files_missing']} missing files detected and fixed"
             )
 
             return stats
@@ -237,10 +246,19 @@ class AudibleSyncService:
             account.last_sync_timestamp = datetime.utcnow()
             self.db.commit()
 
+            # Verify file integrity for all books
+            logger.info("Verifying file integrity for all books...")
+            integrity_stats = self._verify_file_integrity()
+            stats["files_verified"] = integrity_stats["verified"]
+            stats["files_missing"] = integrity_stats["missing"]
+            stats["files_fixed"] = integrity_stats["fixed"]
+
             logger.info(
                 f"Sync complete for {account.username}: "
                 f"{stats['new']} new, {stats['updated']} updated, "
-                f"{stats['queued']} queued for download"
+                f"{stats['queued']} queued for download, "
+                f"{stats['files_verified']} files verified, "
+                f"{stats['files_missing']} missing files detected and fixed"
             )
 
             return stats
@@ -458,3 +476,54 @@ class AudibleSyncService:
 
         except Exception as e:
             logger.error(f"Failed to queue cover download for {book.title}: {e}")
+
+    def _verify_file_integrity(self) -> dict:
+        """
+        Verify that all books marked as downloaded actually have files on disk.
+
+        If a file is missing, clear the file-related fields and re-enable downloads.
+
+        Returns:
+            Dictionary with verification statistics
+        """
+        stats = {
+            "verified": 0,
+            "missing": 0,
+            "fixed": 0,
+        }
+
+        # Get all books that claim to have a file
+        books_with_files = self.db.query(Book).filter(Book.file_path.isnot(None)).all()
+
+        for book in books_with_files:
+            stats["verified"] += 1
+
+            # Build absolute path to file
+            file_path = Path(book.file_path)
+            if not file_path.is_absolute():
+                file_path = settings.audiobooks_path / file_path
+
+            # Check if file exists
+            if not file_path.exists():
+                logger.warning(f"Missing file for book '{book.title}': {file_path}")
+                stats["missing"] += 1
+
+                # Clear file-related fields
+                book.file_path = None
+                book.file_size = None
+                book.file_format = None
+                book.downloaded_at = None
+
+                # Re-enable downloads for Audible books
+                if book.source == BookSource.AUDIBLE:
+                    book.download_enabled = True
+                    logger.info(f"Re-enabled downloads for '{book.title}'")
+
+                stats["fixed"] += 1
+
+        # Commit changes if any files were fixed
+        if stats["fixed"] > 0:
+            self.db.commit()
+            logger.info(f"Fixed {stats['fixed']} books with missing files")
+
+        return stats
