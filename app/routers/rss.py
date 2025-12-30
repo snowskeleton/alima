@@ -41,9 +41,9 @@ async def get_rss_feed(slug: str, db: Session = Depends(get_db)):
     # Return XML response
     return Response(
         content=rss_xml,
-        media_type="application/rss+xml",
+        media_type="text/xml",
         headers={
-            "Content-Type": "application/rss+xml; charset=utf-8",
+            "Content-Type": "text/xml; charset=utf-8",
         },
     )
 
