@@ -10,34 +10,23 @@
 
 <div class="instructions">
     <p><strong>Instructions:</strong> Place audiobook files (.m4a, .m4b, .mp3) in <code>data/audiobooks/unassigned/</code></p>
-    <p>Files will be automatically matched to books in your library that haven't been downloaded yet.</p>
+    <p>Files are automatically matched to books in your library. Review suggestions and confirm matches or import as new books.</p>
 </div>
 
 <!-- Controls -->
 <div class="controls-section">
-    <div class="threshold-control">
-        <label for="threshold">Confidence Threshold:</label>
-        <input
-            type="range"
-            id="threshold"
-            name="threshold"
-            min="50"
-            max="100"
-            value="{{ threshold }}"
-            step="5"
-            oninput="updateThreshold(this.value)"
-        />
-        <span id="thresholdValue">{{ threshold }}%</span>
-        <button onclick="loadMatches()" class="btn-apply">Apply</button>
+    <div class="file-count">
+        <span class="count-label">Unassigned Files:</span>
+        <span id="fileCount" class="count-value">-</span>
     </div>
 
-    <div id="batchConfirmContainer" style="display: none;">
-        <form method="POST" action="/admin/match-books/batch-confirm" style="display: inline;">
-            <input type="hidden" name="threshold" id="batchThreshold" value="{{ threshold }}">
-            <button type="submit" class="btn-batch" id="batchBtn">
-                Confirm All Auto-Matched
-            </button>
-        </form>
+    <div class="selection-actions">
+        <button onclick="confirmSelectedMatches()" class="btn-confirm-batch" id="confirmBtn" disabled>
+            Confirm Selected Matches
+        </button>
+        <button onclick="importSelectedAsNew()" class="btn-import-batch" id="importBtn" disabled>
+            Import Selected as New
+        </button>
     </div>
 </div>
 
@@ -49,43 +38,25 @@
 
 <!-- Results Container -->
 <div id="resultsContainer" style="display: none;">
-    <!-- Auto-Matched Files -->
-    <div id="matchedSection" style="display: none;">
-        <div class="section-card">
-            <h2>Auto-Matched Files (<span id="matchedThreshold"></span>% confidence)</h2>
-            <p class="section-description">These files have been automatically matched to books. Review and confirm each match.</p>
-            <table class="match-table" id="matchedTable">
-                <thead>
-                    <tr>
-                        <th>File Info</th>
-                        <th>Matched Book</th>
-                        <th>Confidence</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="matchedBody">
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Unmatched Files -->
-    <div id="unmatchedSection" style="display: none;">
-        <div class="section-card">
-            <h2>Manual Matching Required (<span id="unmatchedThreshold"></span>% confidence)</h2>
-            <p class="section-description">These files need manual review. Select a book to match or import as new.</p>
-            <table class="match-table" id="unmatchedTable">
-                <thead>
-                    <tr>
-                        <th>File Info</th>
-                        <th>Manual Selection</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="unmatchedBody">
-                </tbody>
-            </table>
-        </div>
+    <div class="section-card">
+        <table class="match-table" id="filesTable">
+            <thead>
+                <tr>
+                    <th style="width: 3%;"><input type="checkbox" id="selectAll" class="select-all-checkbox"></th>
+                    <th class="sortable" data-sort="filename" style="width: 25%;">
+                        File Name <span class="sort-indicator"></span>
+                    </th>
+                    <th style="width: 15%;">File Info</th>
+                    <th class="sortable" data-sort="confidence" style="width: 8%;">
+                        Match % <span class="sort-indicator"></span>
+                    </th>
+                    <th style="width: 24%;">Suggested Match</th>
+                    <th style="width: 25%;">Override / Select Different</th>
+                </tr>
+            </thead>
+            <tbody id="filesBody">
+            </tbody>
+        </table>
     </div>
 
     <!-- Empty State -->
@@ -99,245 +70,182 @@
 </div>
 
 <script>
-let currentThreshold = {{ threshold }};
+let allFiles = [];
 let availableBooks = [];
-
-function updateThreshold(value) {
-    currentThreshold = value;
-    document.getElementById('thresholdValue').textContent = value + '%';
-}
+let matchedBookIds = new Set();
+let lastChecked = null;
+let currentSort = { column: 'confidence', ascending: false }; // Default: highest confidence first
 
 async function loadMatches() {
-    // Show loading state
     document.getElementById('loadingState').style.display = 'block';
     document.getElementById('resultsContainer').style.display = 'none';
 
     try {
-        const response = await fetch(`/admin/match-books/api/matches?threshold=${currentThreshold}`);
+        const response = await fetch('/admin/match-books/api/matches');
         const data = await response.json();
 
-        // Store available books for dropdowns
+        allFiles = data.files;
         availableBooks = data.available_books;
 
-        // Hide loading
-        document.getElementById('loadingState').style.display = 'none';
-        document.getElementById('resultsContainer').style.display = 'block';
+        // Update file count
+        document.getElementById('fileCount').textContent = allFiles.length;
 
-        // Populate matched files
-        if (data.matched.length > 0) {
-            populateMatched(data.matched);
-            document.getElementById('matchedSection').style.display = 'block';
-            document.getElementById('batchConfirmContainer').style.display = 'block';
-            document.getElementById('batchBtn').textContent = `Confirm All Auto-Matched (${data.matched.length})`;
-            document.getElementById('batchThreshold').value = currentThreshold;
-        } else {
-            document.getElementById('matchedSection').style.display = 'none';
-            document.getElementById('batchConfirmContainer').style.display = 'none';
-        }
-
-        // Populate unmatched files
-        if (data.unmatched.length > 0) {
-            populateUnmatched(data.unmatched);
-            document.getElementById('unmatchedSection').style.display = 'block';
-        } else {
-            document.getElementById('unmatchedSection').style.display = 'none';
-        }
-
-        // Update threshold displays
-        document.getElementById('matchedThreshold').textContent = currentThreshold;
-        document.getElementById('unmatchedThreshold').textContent = currentThreshold;
-
-        // Show empty state if no files
-        if (data.matched.length === 0 && data.unmatched.length === 0) {
+        if (allFiles.length === 0) {
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('resultsContainer').style.display = 'block';
             document.getElementById('emptyState').style.display = 'block';
         } else {
+            // Sort by default (confidence descending)
+            sortFiles(currentSort.column, currentSort.ascending);
+            populateTable();
+
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('resultsContainer').style.display = 'block';
             document.getElementById('emptyState').style.display = 'none';
         }
 
     } catch (error) {
         console.error('Error loading matches:', error);
-        document.getElementById('loadingState').innerHTML = '<div class="error-state"><p>Error loading matches. Please try again.</p></div>';
+        document.getElementById('loadingState').innerHTML =
+            '<div class="error-state"><p>Error loading matches. Please try again.</p></div>';
     }
 }
 
-function populateMatched(matches) {
-    const tbody = document.getElementById('matchedBody');
-    tbody.innerHTML = '';
+function sortFiles(column, ascending) {
+    allFiles.sort((a, b) => {
+        let valA, valB;
 
-    matches.forEach(match => {
-        const tr = document.createElement('tr');
-        tr.dataset.filename = match.filename;
+        if (column === 'filename') {
+            valA = a.filename.toLowerCase();
+            valB = b.filename.toLowerCase();
+        } else if (column === 'confidence') {
+            valA = a.confidence || 0;
+            valB = b.confidence || 0;
+        }
 
-        // File info
-        const fileInfo = document.createElement('td');
-        fileInfo.className = 'file-info';
-        fileInfo.innerHTML = `
-            <div class="filename">${escapeHtml(match.filename)}</div>
-            <details class="metadata-details">
-                <summary>Show metadata</summary>
-                <div class="metadata-content">
-                    <div><strong>Title:</strong> ${match.metadata.title || 'N/A'}</div>
-                    <div><strong>Author:</strong> ${match.metadata.author || 'N/A'}</div>
-                    <div><strong>Narrator:</strong> ${match.metadata.narrator || 'N/A'}</div>
-                    ${match.metadata.duration_seconds ? `<div><strong>Duration:</strong> ${formatDuration(match.metadata.duration_seconds)}</div>` : ''}
-                    <div><strong>File Size:</strong> ${(match.file_size / 1024 / 1024).toFixed(1)} MB</div>
-                </div>
-            </details>
-        `;
-
-        // Matched book
-        const bookInfo = document.createElement('td');
-        bookInfo.className = 'matched-book';
-        bookInfo.innerHTML = `
-            <a href="/library/${match.matched_book.id}" class="book-link">${escapeHtml(match.matched_book.title)}</a>
-            ${match.matched_book.author ? `<div class="book-author">by ${escapeHtml(match.matched_book.author)}</div>` : ''}
-            ${match.matched_book.series ? `<div class="book-series">${escapeHtml(match.matched_book.series)}${match.matched_book.series_position ? ' #' + match.matched_book.series_position : ''}</div>` : ''}
-        `;
-
-        // Confidence
-        const confidence = document.createElement('td');
-        confidence.className = 'confidence';
-        const badgeClass = match.confidence >= 85 ? 'badge-success' : match.confidence >= 70 ? 'badge-warning' : 'badge-secondary';
-        confidence.innerHTML = `<span class="badge ${badgeClass}">${Math.round(match.confidence)}%</span>`;
-
-        // Actions
-        const actions = document.createElement('td');
-        actions.className = 'actions';
-        const form = document.createElement('form');
-        form.className = 'confirm-form';
-        form.innerHTML = `
-            <label class="checkbox-label">
-                <input type="checkbox" name="update_metadata" value="false">
-                Update metadata
-            </label>
-            <button type="submit" class="btn-confirm">Confirm Match</button>
-        `;
-
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const updateMetadata = form.querySelector('input[name="update_metadata"]').checked;
-            await submitMatch(match.filename, match.matched_book.id, updateMetadata, tr);
-        });
-
-        actions.appendChild(form);
-
-        tr.appendChild(fileInfo);
-        tr.appendChild(bookInfo);
-        tr.appendChild(confidence);
-        tr.appendChild(actions);
-        tbody.appendChild(tr);
+        if (valA < valB) return ascending ? -1 : 1;
+        if (valA > valB) return ascending ? 1 : -1;
+        return 0;
     });
+
+    currentSort = { column, ascending };
+    updateSortIndicators();
 }
 
-function populateUnmatched(files) {
-    const tbody = document.getElementById('unmatchedBody');
+function updateSortIndicators() {
+    document.querySelectorAll('.sort-indicator').forEach(indicator => {
+        indicator.textContent = '';
+        indicator.classList.remove('asc', 'desc');
+    });
+
+    const activeHeader = document.querySelector(`[data-sort="${currentSort.column}"]`);
+    if (activeHeader) {
+        const indicator = activeHeader.querySelector('.sort-indicator');
+        indicator.textContent = currentSort.ascending ? ' ▲' : ' ▼';
+        indicator.classList.add(currentSort.ascending ? 'asc' : 'desc');
+    }
+}
+
+function populateTable() {
+    const tbody = document.getElementById('filesBody');
     tbody.innerHTML = '';
 
-    files.forEach((file, index) => {
+    allFiles.forEach((file, index) => {
         const tr = document.createElement('tr');
         tr.dataset.filename = file.filename;
+        tr.dataset.index = index;
+
         const searchId = `search-${index}`;
         const resultsId = `results-${index}`;
 
-        // File info
-        const fileInfo = document.createElement('td');
-        fileInfo.className = 'file-info';
-        let suggestedHtml = '';
-        if (file.suggested_book) {
-            suggestedHtml = `
-                <div class="suggestion">
-                    <span class="suggestion-label">Best match:</span>
-                    <a href="/library/${file.suggested_book.id}">${escapeHtml(file.suggested_book.title)}</a>
-                    <span class="badge badge-secondary">${Math.round(file.confidence)}%</span>
-                </div>
-            `;
-        }
-        fileInfo.innerHTML = `
-            <div class="filename">${escapeHtml(file.filename)}</div>
+        // Checkbox
+        const checkboxCell = document.createElement('td');
+        checkboxCell.innerHTML = `<input type="checkbox" class="row-checkbox" data-index="${index}">`;
+
+        // Filename
+        const filenameCell = document.createElement('td');
+        filenameCell.className = 'filename-cell';
+        filenameCell.innerHTML = `<div class="filename">${escapeHtml(file.filename)}</div>`;
+
+        // File info (metadata)
+        const infoCell = document.createElement('td');
+        infoCell.className = 'file-info-cell';
+        const metadata = file.metadata || {};
+        infoCell.innerHTML = `
             <details class="metadata-details">
-                <summary>Show metadata</summary>
+                <summary>View</summary>
                 <div class="metadata-content">
-                    <div><strong>Title:</strong> ${file.metadata.title || 'N/A'}</div>
-                    <div><strong>Author:</strong> ${file.metadata.author || 'N/A'}</div>
-                    <div><strong>Narrator:</strong> ${file.metadata.narrator || 'N/A'}</div>
-                    ${file.metadata.series ? `<div><strong>Series:</strong> ${file.metadata.series}</div>` : ''}
-                    ${file.metadata.duration_seconds ? `<div><strong>Duration:</strong> ${formatDuration(file.metadata.duration_seconds)}</div>` : ''}
-                    <div><strong>File Size:</strong> ${(file.file_size / 1024 / 1024).toFixed(1)} MB</div>
+                    <div><strong>Title:</strong> ${metadata.title || 'N/A'}</div>
+                    <div><strong>Author:</strong> ${metadata.author || 'N/A'}</div>
+                    <div><strong>Narrator:</strong> ${metadata.narrator || 'N/A'}</div>
+                    ${metadata.duration_seconds ? `<div><strong>Duration:</strong> ${formatDuration(metadata.duration_seconds)}</div>` : ''}
+                    <div><strong>Size:</strong> ${formatFileSize(file.file_size)}</div>
                 </div>
             </details>
-            ${suggestedHtml}
         `;
 
-        // Manual selection with autocomplete
-        const selection = document.createElement('td');
-        selection.className = 'manual-selection';
+        // Confidence
+        const confidenceCell = document.createElement('td');
+        confidenceCell.className = 'confidence-cell';
+        const conf = file.confidence || 0;
+        const badgeClass = conf >= 85 ? 'badge-success' : conf >= 50 ? 'badge-warning' : 'badge-secondary';
+        confidenceCell.innerHTML = `<span class="badge ${badgeClass}">${Math.round(conf)}%</span>`;
 
-        const initialValue = file.suggested_book ? `${file.suggested_book.title}${file.suggested_book.author ? ' - ' + file.suggested_book.author : ''}` : '';
-        const initialBookId = file.suggested_book ? file.suggested_book.id : null;
+        // Suggested match
+        const suggestedCell = document.createElement('td');
+        suggestedCell.className = 'suggested-cell';
+        if (file.suggested_book) {
+            const book = file.suggested_book;
+            suggestedCell.innerHTML = `
+                <a href="/library/${book.id}" class="book-link" target="_blank">${escapeHtml(book.title)}</a>
+                ${book.author ? `<div class="book-author">by ${escapeHtml(book.author)}</div>` : ''}
+                ${book.series ? `<div class="book-series">${escapeHtml(book.series)}${book.series_position ? ' #' + book.series_position : ''}</div>` : ''}
+            `;
+        } else {
+            suggestedCell.innerHTML = '<span class="no-match">No match found</span>';
+        }
 
-        selection.innerHTML = `
+        // Override selection
+        const overrideCell = document.createElement('td');
+        overrideCell.className = 'override-cell';
+
+        const initialValue = file.suggested_book ?
+            `${file.suggested_book.title}${file.suggested_book.author ? ' - ' + file.suggested_book.author : ''}` : '';
+        const initialBookId = file.suggested_book ? file.suggested_book.id : '';
+
+        overrideCell.innerHTML = `
             <div class="autocomplete-wrapper">
                 <input
                     type="text"
                     id="${searchId}"
                     class="book-search"
-                    placeholder="Search for book..."
+                    placeholder="Search to override..."
                     value="${escapeHtml(initialValue)}"
-                    data-book-id="${initialBookId || ''}"
+                    data-book-id="${initialBookId}"
                     autocomplete="off"
                 />
                 <div id="${resultsId}" class="autocomplete-results"></div>
             </div>
-            <label class="checkbox-label">
-                <input type="checkbox" name="update_metadata" class="update-metadata-checkbox">
-                Update metadata
-            </label>
         `;
 
-        // Setup autocomplete
-        setTimeout(() => setupAutocomplete(searchId, resultsId), 0);
+        // Setup autocomplete after adding to DOM
+        setTimeout(() => setupAutocomplete(searchId, resultsId, index), 0);
 
-        // Actions
-        const actions = document.createElement('td');
-        actions.className = 'actions';
+        tr.appendChild(checkboxCell);
+        tr.appendChild(filenameCell);
+        tr.appendChild(infoCell);
+        tr.appendChild(confidenceCell);
+        tr.appendChild(suggestedCell);
+        tr.appendChild(overrideCell);
 
-        const matchBtn = document.createElement('button');
-        matchBtn.className = 'btn-match';
-        matchBtn.textContent = 'Match to Selected';
-        matchBtn.addEventListener('click', async () => {
-            const input = document.getElementById(searchId);
-            const bookId = input.dataset.bookId;
-            if (!bookId) {
-                alert('Please select a book from the search results');
-                return;
-            }
-            const updateMetadata = selection.querySelector('.update-metadata-checkbox').checked;
-            await submitMatch(file.filename, bookId, updateMetadata, tr);
-        });
-
-        const orLabel = document.createElement('span');
-        orLabel.className = 'or-label';
-        orLabel.textContent = 'OR';
-
-        const importBtn = document.createElement('button');
-        importBtn.className = 'btn-import';
-        importBtn.textContent = 'Import as New';
-        importBtn.addEventListener('click', async () => {
-            await importAsNew(file.filename, tr);
-        });
-
-        actions.appendChild(matchBtn);
-        actions.appendChild(orLabel);
-        actions.appendChild(importBtn);
-
-        tr.appendChild(fileInfo);
-        tr.appendChild(selection);
-        tr.appendChild(actions);
         tbody.appendChild(tr);
     });
+
+    // Setup checkbox handlers
+    setupCheckboxHandlers();
 }
 
-function setupAutocomplete(searchId, resultsId) {
+function setupAutocomplete(searchId, resultsId, fileIndex) {
     const input = document.getElementById(searchId);
     const resultsDiv = document.getElementById(resultsId);
 
@@ -349,23 +257,30 @@ function setupAutocomplete(searchId, resultsId) {
         if (!query) {
             resultsDiv.innerHTML = '';
             resultsDiv.style.display = 'none';
-            this.dataset.bookId = '';
+            // Reset to original suggestion if exists
+            const file = allFiles[fileIndex];
+            if (file.suggested_book) {
+                this.dataset.bookId = file.suggested_book.id;
+            } else {
+                this.dataset.bookId = '';
+            }
             return;
         }
 
-        // Filter books
+        // Filter books (exclude already matched)
         const filtered = availableBooks.filter(book => {
+            if (matchedBookIds.has(book.id)) return false;
             const title = (book.title || '').toLowerCase();
             const author = (book.author || '').toLowerCase();
             return title.includes(query) || author.includes(query);
         });
 
         if (filtered.length === 0) {
-            resultsDiv.innerHTML = '<div class="autocomplete-item no-results">No results</div>';
+            resultsDiv.innerHTML = '<div class="autocomplete-item no-results">No available books match</div>';
             resultsDiv.style.display = 'block';
             this.dataset.bookId = '';
         } else {
-            resultsDiv.innerHTML = filtered.map(book => `
+            resultsDiv.innerHTML = filtered.slice(0, 20).map(book => `
                 <div class="autocomplete-item" data-book-id="${book.id}">
                     <div class="autocomplete-title">${escapeHtml(book.title)}</div>
                     ${book.author ? `<div class="autocomplete-author">${escapeHtml(book.author)}</div>` : ''}
@@ -398,58 +313,179 @@ function setupAutocomplete(searchId, resultsId) {
     });
 }
 
-async function submitMatch(filename, bookId, updateMetadata, row) {
-    try {
-        const formData = new FormData();
-        if (updateMetadata) {
-            formData.append('update_metadata', 'true');
-        }
+function setupCheckboxHandlers() {
+    const selectAll = document.getElementById('selectAll');
+    const checkboxes = document.querySelectorAll('.row-checkbox');
 
-        const response = await fetch(`/admin/match-books/${encodeURIComponent(filename)}/confirm/${bookId}`, {
-            method: 'POST',
-            body: formData,
+    // Select all handler
+    selectAll.addEventListener('change', function() {
+        checkboxes.forEach(cb => cb.checked = this.checked);
+        updateBatchButtons();
+    });
+
+    // Individual checkbox handlers
+    checkboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', () => {
+            updateBatchButtons();
         });
 
-        if (response.redirected) {
-            // Success - remove the row
-            row.style.opacity = '0.5';
-            setTimeout(() => row.remove(), 300);
-        } else {
-            alert('Error confirming match. Please try again.');
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Error confirming match. Please try again.');
+        // Shift-click selection
+        checkbox.addEventListener('click', function(e) {
+            if (e.shiftKey && lastChecked) {
+                const start = parseInt(lastChecked.dataset.index);
+                const end = parseInt(this.dataset.index);
+                const [min, max] = [Math.min(start, end), Math.max(start, end)];
+
+                checkboxes.forEach(cb => {
+                    const idx = parseInt(cb.dataset.index);
+                    if (idx >= min && idx <= max) {
+                        cb.checked = this.checked;
+                    }
+                });
+            }
+            lastChecked = this;
+            updateBatchButtons();
+        });
+    });
+}
+
+function updateBatchButtons() {
+    const checked = document.querySelectorAll('.row-checkbox:checked');
+    const confirmBtn = document.getElementById('confirmBtn');
+    const importBtn = document.getElementById('importBtn');
+
+    if (checked.length > 0) {
+        confirmBtn.disabled = false;
+        importBtn.disabled = false;
+        confirmBtn.textContent = `Confirm Selected Matches (${checked.length})`;
+        importBtn.textContent = `Import Selected as New (${checked.length})`;
+    } else {
+        confirmBtn.disabled = true;
+        importBtn.disabled = true;
+        confirmBtn.textContent = 'Confirm Selected Matches';
+        importBtn.textContent = 'Import Selected as New';
     }
 }
 
-async function importAsNew(filename, row) {
-    if (!confirm(`Import "${filename}" as a new book?`)) {
+async function confirmSelectedMatches() {
+    const checked = document.querySelectorAll('.row-checkbox:checked');
+    if (checked.length === 0) return;
+
+    let success = 0;
+    let failed = 0;
+
+    for (const checkbox of checked) {
+        const index = parseInt(checkbox.dataset.index);
+        const file = allFiles[index];
+        const row = checkbox.closest('tr');
+        const searchInput = row.querySelector('.book-search');
+        const bookId = searchInput.dataset.bookId;
+
+        if (!bookId) {
+            failed++;
+            continue;
+        }
+
+        try {
+            const response = await fetch(`/admin/match-books/${encodeURIComponent(file.filename)}/confirm/${bookId}`, {
+                method: 'POST',
+                body: new FormData(),
+            });
+
+            if (response.redirected || response.ok) {
+                success++;
+                matchedBookIds.add(parseInt(bookId));
+                row.style.opacity = '0.3';
+                setTimeout(() => {
+                    row.remove();
+                    allFiles.splice(index, 1);
+                    updateFileCount(-1);
+                }, 300);
+            } else {
+                failed++;
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            failed++;
+        }
+    }
+
+    if (success > 0 || failed > 0) {
+        setTimeout(() => {
+            populateTable(); // Refresh to fix indices
+            updateBatchButtons();
+        }, 400);
+    }
+}
+
+async function importSelectedAsNew() {
+    const checked = document.querySelectorAll('.row-checkbox:checked');
+    if (checked.length === 0) return;
+
+    if (!confirm(`Import ${checked.length} file(s) as new books?`)) {
         return;
     }
 
-    try {
-        const response = await fetch(`/admin/match-books/${encodeURIComponent(filename)}/import-new`, {
-            method: 'POST',
-        });
+    let success = 0;
+    let failed = 0;
 
-        if (response.redirected) {
-            // Success - remove the row
-            row.style.opacity = '0.5';
-            setTimeout(() => row.remove(), 300);
-        } else {
-            alert('Error importing book. Please try again.');
+    for (const checkbox of checked) {
+        const index = parseInt(checkbox.dataset.index);
+        const file = allFiles[index];
+        const row = checkbox.closest('tr');
+
+        try {
+            const response = await fetch(`/admin/match-books/${encodeURIComponent(file.filename)}/import-new`, {
+                method: 'POST',
+            });
+
+            if (response.redirected || response.ok) {
+                success++;
+                row.style.opacity = '0.3';
+                setTimeout(() => {
+                    row.remove();
+                    allFiles.splice(index, 1);
+                    updateFileCount(-1);
+                }, 300);
+            } else {
+                failed++;
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            failed++;
         }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Error importing book. Please try again.');
     }
+
+    if (success > 0 || failed > 0) {
+        setTimeout(() => {
+            populateTable(); // Refresh to fix indices
+            updateBatchButtons();
+        }, 400);
+    }
+}
+
+function updateFileCount(delta) {
+    const countElement = document.getElementById('fileCount');
+    const currentCount = parseInt(countElement.textContent) || 0;
+    countElement.textContent = Math.max(0, currentCount + delta);
 }
 
 function formatDuration(seconds) {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     return `${hours}h ${minutes}m`;
+}
+
+function formatFileSize(bytes) {
+    if (!bytes) return 'N/A';
+    const gb = bytes / 1024 / 1024 / 1024;
+    const mb = bytes / 1024 / 1024;
+    const kb = bytes / 1024;
+
+    if (gb >= 1) return `${gb.toFixed(1)} GB`;
+    if (mb >= 1) return `${mb.toFixed(1)} MB`;
+    if (kb >= 1) return `${kb.toFixed(1)} KB`;
+    return `${bytes} B`;
 }
 
 function escapeHtml(text) {
@@ -459,8 +495,18 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Load matches on page load
+// Setup sortable headers
 document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.sortable').forEach(header => {
+        header.style.cursor = 'pointer';
+        header.addEventListener('click', function() {
+            const column = this.dataset.sort;
+            const ascending = currentSort.column === column ? !currentSort.ascending : false;
+            sortFiles(column, ascending);
+            populateTable();
+        });
+    });
+
     loadMatches();
 });
 </script>
@@ -509,57 +555,71 @@ document.addEventListener('DOMContentLoaded', function() {
     padding: 1rem;
     background: #f9fafb;
     border-radius: 4px;
+    flex-wrap: wrap;
 }
 
-.threshold-control {
+.file-count {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    flex: 1;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: white;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
 }
 
-.threshold-control label {
+.count-label {
     font-weight: 500;
-    color: #374151;
+    color: #6b7280;
+    font-size: 0.875rem;
 }
 
-.threshold-control input[type="range"] {
-    flex: 1;
-    max-width: 300px;
+.count-value {
+    font-weight: 700;
+    color: #1f2937;
+    font-size: 1.125rem;
 }
 
-#thresholdValue {
-    min-width: 50px;
-    font-weight: 600;
-    color: #059669;
+.selection-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
 }
 
-.btn-apply,
-.btn-batch {
+.btn-confirm-batch,
+.btn-import-batch {
     padding: 0.5rem 1rem;
     border-radius: 4px;
     border: none;
     cursor: pointer;
     font-size: 0.875rem;
     font-weight: 500;
+    white-space: nowrap;
+    transition: opacity 0.2s;
 }
 
-.btn-apply {
-    background: #3b82f6;
-    color: white;
-}
-
-.btn-apply:hover {
-    background: #2563eb;
-}
-
-.btn-batch {
+.btn-confirm-batch {
     background: #10b981;
     color: white;
 }
 
-.btn-batch:hover {
+.btn-confirm-batch:hover:not(:disabled) {
     background: #059669;
+}
+
+.btn-import-batch {
+    background: #6b7280;
+    color: white;
+}
+
+.btn-import-batch:hover:not(:disabled) {
+    background: #4b5563;
+}
+
+.btn-confirm-batch:disabled,
+.btn-import-batch:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .loading-state {
@@ -594,27 +654,13 @@ document.addEventListener('DOMContentLoaded', function() {
     background: white;
     border: 1px solid #e5e7eb;
     border-radius: 4px;
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
-}
-
-.section-card h2 {
-    font-size: 1.25rem;
-    font-weight: 600;
-    margin: 0 0 0.5rem 0;
-}
-
-.section-description {
-    color: #6b7280;
-    margin: 0 0 1rem 0;
-    font-size: 0.875rem;
+    overflow-x: auto;
 }
 
 .match-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.875rem;
-    table-layout: fixed;
 }
 
 .match-table thead {
@@ -625,58 +671,59 @@ document.addEventListener('DOMContentLoaded', function() {
 .match-table th {
     padding: 0.75rem;
     text-align: left;
-    font-weight: 500;
-    color: #6b7280;
+    font-weight: 600;
+    color: #374151;
+    white-space: nowrap;
+}
+
+.match-table th.sortable {
+    user-select: none;
+}
+
+.match-table th.sortable:hover {
+    background: #f3f4f6;
+}
+
+.sort-indicator {
+    color: #3b82f6;
+    font-size: 0.75rem;
 }
 
 .match-table td {
-    padding: 1rem 0.75rem;
+    padding: 0.75rem;
     border-bottom: 1px solid #f3f4f6;
     vertical-align: top;
 }
 
-/* Column widths */
-.match-table th:nth-child(1),
-.match-table td:nth-child(1) {
-    width: 30%;
-}
-
-.match-table th:nth-child(2),
-.match-table td:nth-child(2) {
-    width: 35%;
-}
-
-.match-table th:nth-child(3),
-.match-table td:nth-child(3) {
-    width: 35%;
-}
-
 .match-table tbody tr {
-    transition: opacity 0.3s ease;
+    transition: opacity 0.3s ease, background 0.15s ease;
 }
 
 .match-table tbody tr:hover {
     background: #fafbfc;
 }
 
-.file-info .filename {
+.select-all-checkbox,
+.row-checkbox {
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+}
+
+.filename-cell .filename {
     font-weight: 500;
-    margin-bottom: 0.25rem;
     color: #1f2937;
+    word-break: break-word;
 }
 
-.metadata-details {
-    margin-top: 0.5rem;
-}
-
-.metadata-details summary {
+.file-info-cell .metadata-details summary {
     cursor: pointer;
     color: #3b82f6;
     font-size: 0.8125rem;
     user-select: none;
 }
 
-.metadata-details summary:hover {
+.file-info-cell .metadata-details summary:hover {
     text-decoration: underline;
 }
 
@@ -686,31 +733,14 @@ document.addEventListener('DOMContentLoaded', function() {
     background: #f9fafb;
     border-radius: 3px;
     font-size: 0.8125rem;
+    min-width: 200px;
 }
 
 .metadata-content div {
     margin: 0.25rem 0;
 }
 
-.matched-book .book-link {
-    color: #1f2937;
-    text-decoration: none;
-    font-weight: 500;
-}
-
-.matched-book .book-link:hover {
-    color: #3b82f6;
-    text-decoration: underline;
-}
-
-.book-author,
-.book-series {
-    font-size: 0.8125rem;
-    color: #6b7280;
-    margin-top: 0.25rem;
-}
-
-.confidence {
+.confidence-cell {
     text-align: center;
 }
 
@@ -737,75 +767,35 @@ document.addEventListener('DOMContentLoaded', function() {
     color: #374151;
 }
 
-.actions {
-    min-width: 200px;
-}
-
-.confirm-form,
-.manual-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-
-.checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    font-size: 0.8125rem;
-    color: #6b7280;
-    cursor: pointer;
-}
-
-.checkbox-label input[type="checkbox"] {
-    cursor: pointer;
-}
-
-.btn-confirm,
-.btn-match,
-.btn-import {
-    padding: 0.5rem 1rem;
-    border-radius: 4px;
-    border: none;
-    cursor: pointer;
-    font-size: 0.875rem;
+.suggested-cell .book-link {
+    color: #1f2937;
+    text-decoration: none;
     font-weight: 500;
 }
 
-.btn-confirm {
-    background: #10b981;
-    color: white;
+.suggested-cell .book-link:hover {
+    color: #3b82f6;
+    text-decoration: underline;
 }
 
-.btn-confirm:hover {
-    background: #059669;
+.book-author,
+.book-series {
+    font-size: 0.8125rem;
+    color: #6b7280;
+    margin-top: 0.25rem;
 }
 
-.btn-match {
-    background: #3b82f6;
-    color: white;
+.no-match {
+    color: #9ca3af;
+    font-style: italic;
 }
 
-.btn-match:hover {
-    background: #2563eb;
-}
-
-.btn-import {
-    background: #6b7280;
-    color: white;
-}
-
-.btn-import:hover {
-    background: #4b5563;
-}
-
-.manual-selection {
-    min-width: 250px;
+.override-cell {
+    min-width: 200px;
 }
 
 .autocomplete-wrapper {
     position: relative;
-    margin-bottom: 0.5rem;
 }
 
 .book-search {
@@ -814,9 +804,6 @@ document.addEventListener('DOMContentLoaded', function() {
     border: 1px solid #d1d5db;
     border-radius: 4px;
     font-size: 0.875rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .book-search:focus {
@@ -872,35 +859,6 @@ document.addEventListener('DOMContentLoaded', function() {
     font-size: 0.8125rem;
     color: #6b7280;
     word-wrap: break-word;
-}
-
-.or-label {
-    display: inline-block;
-    margin: 0 0.5rem;
-    color: #9ca3af;
-    font-size: 0.8125rem;
-}
-
-.suggestion {
-    margin-top: 0.5rem;
-    padding: 0.5rem;
-    background: #fef3c7;
-    border-radius: 3px;
-    font-size: 0.8125rem;
-}
-
-.suggestion-label {
-    font-weight: 500;
-    color: #92400e;
-}
-
-.suggestion a {
-    color: #92400e;
-    text-decoration: none;
-}
-
-.suggestion a:hover {
-    text-decoration: underline;
 }
 
 .empty-state {

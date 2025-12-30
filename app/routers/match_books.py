@@ -42,15 +42,14 @@ async def match_books_page(
 
 @router.get("/api/matches", response_class=JSONResponse)
 async def get_matches(
-    threshold: float = Query(85.0, ge=50.0, le=100.0, description="Confidence threshold"),
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """API endpoint to fetch matches (called via JavaScript)."""
+    """API endpoint to fetch all unassigned files with their best matches."""
     matcher_service = BookMatcherService(db)
 
-    # Get matches
-    matches = matcher_service.find_matches(threshold=threshold)
+    # Get all matches (using low threshold to include all suggestions)
+    matches = matcher_service.find_matches(threshold=0)
 
     # Get all books without files for manual dropdown
     available_books = (
@@ -60,14 +59,16 @@ async def get_matches(
         .all()
     )
 
-    # Convert to JSON-serializable format
-    matched_data = []
+    # Combine all files into unified list
+    all_files = []
+
+    # Add matched files
     for match in matches["matched"]:
-        matched_data.append({
+        all_files.append({
             "filename": match["filename"],
             "file_size": match["file_size"],
             "metadata": match["metadata"] or {},
-            "matched_book": {
+            "suggested_book": {
                 "id": match["matched_book"].id,
                 "title": match["matched_book"].title,
                 "author": match["matched_book"].author,
@@ -77,12 +78,13 @@ async def get_matches(
             "confidence": match["confidence"],
         })
 
-    unmatched_data = []
+    # Add unmatched files (which may still have suggestions below threshold)
     for file in matches["unmatched"]:
         file_data = {
             "filename": file["filename"],
             "file_size": file["file_size"],
             "metadata": file["metadata"] or {},
+            "confidence": file.get("confidence", 0),
         }
         if file.get("suggested_book"):
             file_data["suggested_book"] = {
@@ -90,8 +92,9 @@ async def get_matches(
                 "title": file["suggested_book"].title,
                 "author": file["suggested_book"].author,
             }
-            file_data["confidence"] = file.get("confidence", 0)
-        unmatched_data.append(file_data)
+        else:
+            file_data["suggested_book"] = None
+        all_files.append(file_data)
 
     books_data = [
         {
@@ -103,8 +106,7 @@ async def get_matches(
     ]
 
     return {
-        "matched": matched_data,
-        "unmatched": unmatched_data,
+        "files": all_files,
         "available_books": books_data,
     }
 
@@ -212,6 +214,49 @@ async def batch_confirm_matches(
         flash(
             request,
             f"Failed to match {error_count} file(s). Check logs for details.",
+            "error",
+        )
+
+    return RedirectResponse(
+        url="/admin/match-books",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/batch-import-unmatched")
+async def batch_import_unmatched(
+    request: Request,
+    threshold: float = Form(85.0),
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Import all unmatched files as new books."""
+    matcher_service = BookMatcherService(db)
+
+    # Get matches
+    matches = matcher_service.find_matches(threshold=threshold)
+
+    success_count = 0
+    error_count = 0
+
+    for file in matches["unmatched"]:
+        try:
+            matcher_service.import_as_new(filename=file["filename"])
+            success_count += 1
+        except Exception as e:
+            error_count += 1
+            # Log but continue with other files
+
+    if success_count > 0:
+        flash(
+            request,
+            f"Successfully imported {success_count} file(s) as new books!",
+            "success",
+        )
+    if error_count > 0:
+        flash(
+            request,
+            f"Failed to import {error_count} file(s). Check logs for details.",
             "error",
         )
 
