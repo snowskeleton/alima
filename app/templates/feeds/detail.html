@@ -49,19 +49,27 @@
 
     <div class="subscribe-section">
         <h2>Subscribe to this Podcast</h2>
+
+        <!-- Quick Subscribe Buttons -->
+        <div class="quick-subscribe">
+            <a href="overcast://x-callback-url/add?url={{ rss_url|urlencode }}" class="subscribe-button">
+                <img src="{{ url_for('static', path='/images/overcast-icon.png') }}" alt="Overcast">
+                <span>Subscribe in Overcast</span>
+            </a>
+            <a href="podcast://{{ rss_url }}" class="subscribe-button">
+                <img src="{{ url_for('static', path='/images/apple-podcasts-icon.svg') }}" alt="Apple Podcasts">
+                <span>Subscribe in Apple Podcasts</span>
+            </a>
+        </div>
+
+        <div class="divider">
+            <span>or</span>
+        </div>
+
         <p>Copy the RSS URL below and add it to your favorite podcast app:</p>
         <div class="rss-url-container">
             <input type="text" id="rss-url" value="{{ rss_url }}" readonly>
             <button onclick="copyRssUrl()" class="btn btn-primary">Copy URL</button>
-        </div>
-        <div class="subscribe-apps">
-            <p><strong>Popular podcast apps:</strong></p>
-            <ul>
-                <li>Apple Podcasts - Add by URL</li>
-                <li>Overcast - Add URL</li>
-                <li>Pocket Casts - Add podcast by URL</li>
-                <li>AntennaPod - Add podcast by RSS address</li>
-            </ul>
         </div>
     </div>
 
@@ -205,7 +213,69 @@
 }
 
 .subscribe-section h2 {
-    margin-bottom: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.quick-subscribe {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+}
+
+.subscribe-button {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.875rem 1.5rem;
+    background: white;
+    border: 2px solid #e5e7eb;
+    border-radius: 0.5rem;
+    text-decoration: none;
+    color: #333;
+    font-weight: 500;
+    transition: all 0.2s;
+    flex: 1;
+    min-width: 200px;
+}
+
+.subscribe-button:hover {
+    border-color: var(--primary-color);
+    background: #f9fafb;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.subscribe-button img {
+    width: 48px;
+    height: 48px;
+    border-radius: 0.375rem;
+}
+
+.divider {
+    position: relative;
+    text-align: center;
+    margin: 2rem 0;
+}
+
+.divider::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: #e5e7eb;
+}
+
+.divider span {
+    position: relative;
+    background: white;
+    padding: 0 1rem;
+    color: var(--secondary-color);
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .rss-url-container {
@@ -221,18 +291,6 @@
     border-radius: 0.375rem;
     font-family: monospace;
     font-size: 0.875rem;
-}
-
-.subscribe-apps {
-    margin-top: 1.5rem;
-    padding: 1rem;
-    background: #f9fafb;
-    border-radius: 0.375rem;
-}
-
-.subscribe-apps ul {
-    margin: 0.5rem 0 0 1.5rem;
-    color: var(--secondary-color);
 }
 
 .episodes-section {
@@ -321,6 +379,14 @@
     .feed-cover {
         max-width: 300px;
         margin: 0 auto;
+    }
+
+    .quick-subscribe {
+        flex-direction: column;
+    }
+
+    .subscribe-button {
+        min-width: 100%;
     }
 
     .episodes-grid {

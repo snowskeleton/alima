@@ -53,7 +53,7 @@ logging.getLogger("audible.auth").setLevel(logging.WARNING)
 def format_dict_pretty(data: dict) -> str:
     """Format a dictionary as pretty-printed JSON for logging."""
     return "\n" + json.dumps(data, indent=2, default=str)
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -91,6 +91,18 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
             request.scope["scheme"] = "https"
 
         response = await call_next(request)
+        return response
+
+
+class NoIndexMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to add X-Robots-Tag header to all responses.
+
+    This prevents search engines from indexing any page on the site.
+    """
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet, noimageindex"
         return response
 
 
@@ -199,6 +211,9 @@ app.add_middleware(
 # This ensures correct URL generation behind reverse proxies
 app.add_middleware(HTTPSRedirectMiddleware)
 
+# Add X-Robots-Tag header to prevent search engine indexing
+app.add_middleware(NoIndexMiddleware)
+
 # Trust proxy headers (for HTTPS behind reverse proxy)
 app.add_middleware(
     TrustedHostMiddleware,
@@ -226,6 +241,18 @@ async def health_check():
             "replication_mode": settings.replication_mode,
         }
     )
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse, tags=["Root"])
+async def robots():
+    """
+    Serve robots.txt to block search engines and AI crawlers.
+
+    Returns robots.txt file that disallows all crawlers from indexing the site.
+    """
+    from pathlib import Path
+    robots_path = Path("app/static/robots.txt")
+    return robots_path.read_text()
 
 
 @app.get("/", tags=["Root"])

@@ -380,7 +380,7 @@ async def reset_password_page(
 ):
     """Display password reset form."""
     from ..models import PasswordReset
-    from ..utils.flash import get_flashed_messages
+    from ..utils.flash import flash, get_flashed_messages
 
     # Validate token
     reset_request = (
@@ -390,26 +390,18 @@ async def reset_password_page(
     )
 
     if not reset_request:
-        return templates.TemplateResponse(
-            request=request,
-            name="auth/reset_password.html",
-            context={
-                "error": "Invalid or expired reset link",
-                "token": None,
-                "messages": get_flashed_messages(request),
-            },
+        flash(request, "Invalid or expired reset link. Please request a new password reset link from your administrator.", "error")
+        return RedirectResponse(
+            url="/auth/login",
+            status_code=status.HTTP_303_SEE_OTHER,
         )
 
     # Check if expired
     if reset_request.expires_at < datetime.utcnow():
-        return templates.TemplateResponse(
-            request=request,
-            name="auth/reset_password.html",
-            context={
-                "error": "This reset link has expired",
-                "token": None,
-                "messages": get_flashed_messages(request),
-            },
+        flash(request, "This reset link has expired. Please request a new password reset link from your administrator.", "error")
+        return RedirectResponse(
+            url="/auth/login",
+            status_code=status.HTTP_303_SEE_OTHER,
         )
 
     return templates.TemplateResponse(
@@ -417,7 +409,6 @@ async def reset_password_page(
         name="auth/reset_password.html",
         context={
             "token": token,
-            "error": None,
             "messages": get_flashed_messages(request),
         },
     )
