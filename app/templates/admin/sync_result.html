@@ -42,13 +42,40 @@
                 </div>
                 <div class="stat-item">
                     <div class="stat-value {% if stats.files_fixed > 0 %}stat-success{% endif %}">{{ stats.files_fixed }}</div>
-                    <div class="stat-label">Fixed</div>
+                    <div class="stat-label">Cleared from DB</div>
                 </div>
             </div>
+            {% if stats.orphaned_files is defined %}
+            <div class="stats-grid integrity-grid" style="margin-top: 1rem;">
+                <div class="stat-item">
+                    <div class="stat-value {% if stats.orphaned_files > 0 %}stat-warning{% endif %}">{{ stats.orphaned_files }}</div>
+                    <div class="stat-label">Orphaned Files</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value {% if stats.reconnected > 0 %}stat-success{% endif %}">{{ stats.reconnected }}</div>
+                    <div class="stat-label">Reconnected</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">{{ stats.orphaned_files - stats.reconnected }}</div>
+                    <div class="stat-label">Still Unmatched</div>
+                </div>
+            </div>
+            {% endif %}
             {% if stats.files_missing > 0 %}
             <p class="integrity-note">
                 ℹ️ Missing files have been detected and the database has been updated.
                 Downloads have been re-enabled for affected Audible books.
+            </p>
+            {% endif %}
+            {% if stats.reconnected is defined and stats.reconnected > 0 %}
+            <p class="integrity-note integrity-note-success">
+                ✅ Reconnected {{ stats.reconnected }} orphaned file(s) to their books in the database.
+            </p>
+            {% endif %}
+            {% if stats.orphaned_files is defined and (stats.orphaned_files - stats.reconnected) > 0 %}
+            <p class="integrity-note">
+                ℹ️ {{ stats.orphaned_files - stats.reconnected }} file(s) in the audiobooks directory could not be automatically matched.
+                You can manually match them on the <a href="/admin/match-books">Match Books</a> page.
             </p>
             {% endif %}
         </div>
@@ -174,6 +201,17 @@
     border-radius: 4px;
     color: #856404;
     font-size: 0.9rem;
+}
+
+.integrity-note-success {
+    background: #d4edda;
+    border: 1px solid #28a745;
+    color: #155724;
+}
+
+.integrity-note a {
+    color: inherit;
+    text-decoration: underline;
 }
 </style>
 {% endblock %}

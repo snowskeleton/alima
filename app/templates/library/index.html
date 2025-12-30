@@ -233,14 +233,27 @@
 <script>
 // Auto-submit form on text input after delay
 let searchTimeout;
-document.querySelectorAll('input[type="text"]').forEach(input => {
-    input.addEventListener('input', function() {
+const searchInput = document.querySelector('input[name="search"]');
+
+if (searchInput) {
+    // Restore focus if this was a search submission
+    if (sessionStorage.getItem('searchFocused') === 'true') {
+        searchInput.focus();
+        // Set cursor to end of input
+        const len = searchInput.value.length;
+        searchInput.setSelectionRange(len, len);
+        sessionStorage.removeItem('searchFocused');
+    }
+
+    searchInput.addEventListener('input', function() {
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(() => {
+            // Mark that search input had focus before submit
+            sessionStorage.setItem('searchFocused', 'true');
             document.getElementById('filterForm').submit();
         }, 500);
     });
-});
+}
 
 // Infinite scroll
 (function() {

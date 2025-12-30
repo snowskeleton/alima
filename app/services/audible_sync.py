@@ -137,6 +137,8 @@ class AudibleSyncService:
             stats["files_verified"] = integrity_stats["verified"]
             stats["files_missing"] = integrity_stats["missing"]
             stats["files_fixed"] = integrity_stats["fixed"]
+            stats["orphaned_files"] = integrity_stats["orphaned_files"]
+            stats["reconnected"] = integrity_stats["reconnected"]
 
             logger.info(
                 f"Quick sync complete for {account.username}: "
@@ -144,7 +146,8 @@ class AudibleSyncService:
                 f"{stats['queued']} queued for download, "
                 f"{stats['covers_queued']} covers queued, "
                 f"{stats['files_verified']} files verified, "
-                f"{stats['files_missing']} missing files detected and fixed"
+                f"{stats['files_missing']} missing files detected and fixed, "
+                f"{stats['reconnected']} orphaned files reconnected"
             )
 
             return stats
@@ -252,13 +255,16 @@ class AudibleSyncService:
             stats["files_verified"] = integrity_stats["verified"]
             stats["files_missing"] = integrity_stats["missing"]
             stats["files_fixed"] = integrity_stats["fixed"]
+            stats["orphaned_files"] = integrity_stats["orphaned_files"]
+            stats["reconnected"] = integrity_stats["reconnected"]
 
             logger.info(
                 f"Sync complete for {account.username}: "
                 f"{stats['new']} new, {stats['updated']} updated, "
                 f"{stats['queued']} queued for download, "
                 f"{stats['files_verified']} files verified, "
-                f"{stats['files_missing']} missing files detected and fixed"
+                f"{stats['files_missing']} missing files detected and fixed, "
+                f"{stats['reconnected']} orphaned files reconnected"
             )
 
             return stats
@@ -479,9 +485,9 @@ class AudibleSyncService:
 
     def _verify_file_integrity(self) -> dict:
         """
-        Verify that all books marked as downloaded actually have files on disk.
-
-        If a file is missing, clear the file-related fields and re-enable downloads.
+        Verify file integrity in both directions:
+        1. Books marked as downloaded actually have files on disk
+        2. Files on disk are properly associated with books in database
 
         Returns:
             Dictionary with verification statistics
@@ -490,9 +496,12 @@ class AudibleSyncService:
             "verified": 0,
             "missing": 0,
             "fixed": 0,
+            "orphaned_files": 0,
+            "reconnected": 0,
         }
 
-        # Get all books that claim to have a file
+        # PART 1: Check books that claim to have files
+        logger.info("Checking books marked as downloaded...")
         books_with_files = self.db.query(Book).filter(Book.file_path.isnot(None)).all()
 
         for book in books_with_files:
@@ -501,7 +510,7 @@ class AudibleSyncService:
             # Build absolute path to file
             file_path = Path(book.file_path)
             if not file_path.is_absolute():
-                file_path = settings.audiobooks_path / file_path
+                file_path = settings.audiobooks_path.parent / book.file_path
 
             # Check if file exists
             if not file_path.exists():
@@ -521,9 +530,103 @@ class AudibleSyncService:
 
                 stats["fixed"] += 1
 
-        # Commit changes if any files were fixed
-        if stats["fixed"] > 0:
+        # PART 2: Check for orphaned files (files that exist but aren't in database)
+        logger.info("Checking for orphaned files in audiobooks directory...")
+
+        # Get all books without files for matching
+        books_without_files = self.db.query(Book).filter(Book.file_path.is_(None)).all()
+
+        # Scan audiobooks directory for files
+        supported_formats = [".m4a", ".m4b", ".mp3"]
+
+        if settings.audiobooks_path.exists():
+            for file_path in settings.audiobooks_path.iterdir():
+                # Skip directories (like 'unassigned')
+                if not file_path.is_file():
+                    continue
+
+                # Skip unsupported formats
+                if file_path.suffix.lower() not in supported_formats:
+                    continue
+
+                # Check if this file is already associated with a book
+                relative_path = str(file_path.relative_to(settings.audiobooks_path.parent))
+                existing_book = self.db.query(Book).filter(Book.file_path == relative_path).first()
+
+                if existing_book:
+                    # File is already properly associated
+                    continue
+
+                # This is an orphaned file - try to find its book
+                stats["orphaned_files"] += 1
+                logger.info(f"Found orphaned file: {file_path.name}")
+
+                # Try to match by ASIN (for Audible books)
+                matched_book = None
+
+                # Extract potential ASIN from filename (ASINs are alphanumeric, typically 10 chars)
+                filename_parts = file_path.stem.split('_')
+                for part in filename_parts:
+                    if len(part) == 10 and part.isalnum():
+                        # This might be an ASIN
+                        potential_asin = part
+                        matched_book = self.db.query(Book).filter(
+                            Book.asin == potential_asin,
+                            Book.file_path.is_(None)
+                        ).first()
+                        if matched_book:
+                            logger.info(f"Matched file to book by ASIN: {matched_book.title}")
+                            break
+
+                # If no ASIN match, try to extract metadata and fuzzy match
+                if not matched_book and books_without_files:
+                    try:
+                        from .metadata import MetadataService
+                        metadata_service = MetadataService()
+                        file_metadata = metadata_service.read_metadata(file_path)
+
+                        # Try to match by title
+                        if file_metadata and file_metadata.get("title"):
+                            file_title = file_metadata["title"].lower()
+
+                            from rapidfuzz import fuzz
+                            best_score = 0
+                            best_match = None
+
+                            for book in books_without_files:
+                                if book.title:
+                                    score = fuzz.ratio(file_title, book.title.lower())
+                                    if score > best_score:
+                                        best_score = score
+                                        best_match = book
+
+                            # Use high threshold (95%) to avoid incorrect matches
+                            if best_match and best_score >= 95:
+                                matched_book = best_match
+                                logger.info(f"Matched file to book by title (score {best_score}): {matched_book.title}")
+                    except Exception as e:
+                        logger.warning(f"Failed to extract metadata from {file_path.name}: {e}")
+
+                # If we found a match, associate the file with the book
+                if matched_book:
+                    matched_book.file_path = relative_path
+                    matched_book.file_size = file_path.stat().st_size
+                    matched_book.file_format = file_path.suffix.lower().lstrip(".")
+                    matched_book.downloaded_at = datetime.utcnow()
+
+                    stats["reconnected"] += 1
+                    logger.info(f"Reconnected file '{file_path.name}' to book '{matched_book.title}'")
+
+                    # Remove from books_without_files list to avoid duplicate matching
+                    books_without_files = [b for b in books_without_files if b.id != matched_book.id]
+
+        # Commit all changes
+        if stats["fixed"] > 0 or stats["reconnected"] > 0:
             self.db.commit()
-            logger.info(f"Fixed {stats['fixed']} books with missing files")
+            logger.info(
+                f"File integrity check complete: "
+                f"{stats['fixed']} missing files cleared, "
+                f"{stats['reconnected']} orphaned files reconnected"
+            )
 
         return stats
