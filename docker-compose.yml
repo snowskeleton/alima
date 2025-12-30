@@ -75,6 +75,7 @@ services:
       - ./data/covers:/app/data/covers
       - ./data/audible_auth:/app/data/audible_auth
       - ./data/temp:/app/data/temp
+      - ./data/logs:/app/data/logs
 
     # Optional: Add a reverse proxy network if using Caddy/Nginx
     # networks:

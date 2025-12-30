@@ -19,7 +19,7 @@ def quick_sync_all_libraries():
     from ..services.audible_sync import AudibleSyncService
     from ..models import AudibleAccount
 
-    logger.info("Starting scheduled quick sync")
+    logger.debug("Starting scheduled quick sync")
     db = SessionLocal()
     try:
         sync_service = AudibleSyncService(db)
@@ -48,7 +48,12 @@ def quick_sync_all_libraries():
                 logger.error(f"Failed to quick sync account {account.username}: {e}")
                 overall_stats["accounts_failed"] += 1
 
-        logger.info(f"Scheduled quick sync completed: {overall_stats}")
+        # Only log at INFO if there was actual activity
+        if overall_stats["new_books"] > 0 or overall_stats["updated_books"] > 0:
+            from ..main import format_dict_pretty
+            logger.info(f"Scheduled quick sync completed:{format_dict_pretty(overall_stats)}")
+        else:
+            logger.debug(f"Scheduled quick sync completed: no new or updated books")
     except Exception as e:
         logger.error(f"Error in scheduled quick sync: {e}", exc_info=True)
     finally:
@@ -59,12 +64,14 @@ def sync_all_libraries():
     """Periodic task to fully sync all Audible libraries (full library refresh)."""
     from ..services.audible_sync import AudibleSyncService
 
-    logger.info("Starting scheduled full library sync")
+    logger.debug("Starting scheduled full library sync")
     db = SessionLocal()
     try:
         sync_service = AudibleSyncService(db)
         stats = sync_service.sync_all_accounts()
-        logger.info(f"Scheduled full sync completed: {stats}")
+        # Full sync is always significant, log at INFO with formatted stats
+        from ..main import format_dict_pretty
+        logger.info(f"Scheduled full sync completed:{format_dict_pretty(stats)}")
     except Exception as e:
         logger.error(f"Error in scheduled full sync: {e}", exc_info=True)
     finally:
@@ -75,14 +82,19 @@ def process_download_queue():
     """Periodic task to process the download queue."""
     from ..services.book_download import BookDownloadService
 
-    logger.info("Starting scheduled download processing")
+    logger.debug("Starting scheduled download processing")
     db = SessionLocal()
     try:
         download_service = BookDownloadService(db)
         # Process all pending downloads with parallel execution
         # max_concurrent is controlled by settings
         stats = download_service.process_queue()
-        logger.info(f"Scheduled download processing completed: {stats}")
+        # Only log at INFO if there was actual activity
+        if stats["attempted"] > 0:
+            from ..main import format_dict_pretty
+            logger.info(f"Scheduled download processing completed:{format_dict_pretty(stats)}")
+        else:
+            logger.debug("Scheduled download processing completed: no downloads in queue")
     except Exception as e:
         logger.error(f"Error in scheduled download processing: {e}", exc_info=True)
     finally:
@@ -125,7 +137,7 @@ def start_scheduler():
         name="Quick sync Audible libraries (new books only)",
         replace_existing=True,
     )
-    logger.info(f"Scheduled quick sync to run every {quick_sync_interval_seconds} seconds")
+    logger.debug(f"Scheduled quick sync to run every {quick_sync_interval_seconds} seconds")
 
     # Add full library sync job (runs less frequently for complete refresh)
     scheduler.add_job(
@@ -135,7 +147,7 @@ def start_scheduler():
         name="Full sync all Audible libraries",
         replace_existing=True,
     )
-    logger.info(f"Scheduled full sync to run every {full_sync_interval_hours} hours")
+    logger.debug(f"Scheduled full sync to run every {full_sync_interval_hours} hours")
 
     # Add download queue processing job (runs every 30 seconds for active processing)
     scheduler.add_job(
@@ -145,7 +157,7 @@ def start_scheduler():
         name="Process download queue",
         replace_existing=True,
     )
-    logger.info("Scheduled download processing to run every 30 seconds")
+    logger.debug("Scheduled download processing to run every 30 seconds")
 
     # Start the scheduler
     scheduler.start()

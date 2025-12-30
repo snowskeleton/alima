@@ -63,8 +63,6 @@ class BookDownloadService:
 
         pending = query.all()
 
-        logger.info(f"Processing {len(pending)} downloads from queue with {max_concurrent} concurrent workers")
-
         stats = {
             "attempted": len(pending),
             "completed": 0,
@@ -73,6 +71,9 @@ class BookDownloadService:
 
         if not pending:
             return stats
+
+        # Only log at INFO if there are actually downloads to process
+        logger.info(f"Processing {len(pending)} downloads from queue with {max_concurrent} concurrent workers")
 
         # Filter out books marked as unavailable
         valid_pending = []
@@ -184,7 +185,7 @@ class BookDownloadService:
 
             logger.info(
                 f"Downloading book '{book.title}' (ASIN: {queue_entry.asin}) "
-                f"from account '{account.username}' (marketplace: {account.marketplace})"
+                f"from account '{account.username}'"
             )
 
             # Load authenticator
@@ -192,10 +193,7 @@ class BookDownloadService:
             auth = audible.Authenticator.from_file(str(auth_file))
             client = audible.Client(auth)
 
-            logger.info(
-                f"Using auth file: {auth_file} "
-                f"(exists: {auth_file.exists()})"
-            )
+            logger.debug(f"Using auth file: {auth_file}")
 
             # Get download quality from database settings (with hardcoded default)
             download_quality = "High"  # Default: High quality
@@ -209,7 +207,7 @@ class BookDownloadService:
                 pass  # Silently fall back to hardcoded default
 
             # Request license
-            logger.info(f"Requesting license for {queue_entry.asin}")
+            logger.debug(f"Requesting license for {queue_entry.asin}")
             license_response = client.post(
                 f"content/{queue_entry.asin}/licenserequest",
                 body={
@@ -252,12 +250,12 @@ class BookDownloadService:
                 raise ValueError(error_msg)
 
             # Log the response structure for debugging
-            logger.info(f"License response keys: {license_response.keys()}")
+            logger.debug(f"License response keys: {license_response.keys()}")
             if "content_license" in license_response:
-                logger.info(f"Content license keys: {license_response['content_license'].keys()}")
+                logger.debug(f"Content license keys: {license_response['content_license'].keys()}")
                 if "content_metadata" in license_response["content_license"]:
                     content_metadata = license_response["content_license"]["content_metadata"]
-                    logger.info(f"Content metadata keys: {content_metadata.keys() if content_metadata else 'EMPTY'}")
+                    logger.debug(f"Content metadata keys: {content_metadata.keys() if content_metadata else 'EMPTY'}")
 
             # Get download URL - try different possible structures
             download_url = None
@@ -284,7 +282,7 @@ class BookDownloadService:
                     logger.error(f"Failed to extract download URL from response: {e}")
                     raise
 
-            logger.info(f"Download URL: {download_url[:100]}...")  # Log first 100 chars
+            logger.debug(f"Download URL: {download_url[:100]}...")
 
             # Download .aaxc file
             temp_dir = settings.temp_path
@@ -293,7 +291,7 @@ class BookDownloadService:
             aaxc_file = temp_dir / f"{queue_entry.asin}.aaxc"
             voucher_file = temp_dir / f"{queue_entry.asin}.voucher"
 
-            logger.info(f"Downloading .aaxc file for {queue_entry.asin} to {aaxc_file}")
+            logger.debug(f"Downloading .aaxc file for {queue_entry.asin}")
             # Use the client's raw_request method with apply_cookies=True
             # CloudFront URLs require website cookies, not just auth headers
             self._download_file(download_url, aaxc_file, client)
@@ -405,13 +403,13 @@ class BookDownloadService:
 
             # Skip if book already has a cover
             if book.cover_image_path:
-                logger.info(f"Book '{book.title}' already has cover, skipping")
+                logger.debug(f"Book '{book.title}' already has cover, skipping")
                 queue_entry.status = DownloadStatus.COMPLETED
                 queue_entry.completed_at = datetime.datetime.now(datetime.timezone.utc)
                 self.db.commit()
                 return
 
-            logger.info(f"Downloading cover for '{book.title}' (ASIN: {queue_entry.asin})")
+            logger.debug(f"Downloading cover for '{book.title}' (ASIN: {queue_entry.asin})")
 
             # Use the stored cover URL from database (set during sync)
             image_url = book.cover_url
@@ -459,9 +457,9 @@ class BookDownloadService:
                 # Store the URL for future use
                 book.cover_url = image_url
                 self.db.commit()
-                logger.info(f"Stored cover URL for {book.title}")
+                logger.debug(f"Stored cover URL for {book.title}")
 
-            logger.info(f"Cover URL: {image_url[:100]}...")
+            logger.debug(f"Cover URL: {image_url[:100]}...")
 
             # Ensure covers directory exists
             settings.covers_path.mkdir(parents=True, exist_ok=True)
@@ -532,7 +530,7 @@ class BookDownloadService:
             output_path: Local path to save file
             audible_client: Optional audible.Client instance for authenticated downloads
         """
-        logger.info(f"Downloading from {url[:80]}...")
+        logger.debug(f"Downloading from {url[:80]}...")
 
         # CloudFront URLs are pre-signed and require the Audible app User-Agent header
         # Without this header, CloudFront WAF blocks the request with 403
@@ -565,7 +563,7 @@ class BookDownloadService:
 
         # Save file
         file_size = len(response.content)
-        logger.info(f"Downloaded {file_size} bytes to {output_path}")
+        logger.debug(f"Downloaded {file_size} bytes to {output_path}")
         with open(output_path, "wb") as f:
             f.write(response.content)
 

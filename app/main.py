@@ -1,23 +1,58 @@
 """Main FastAPI application entry point."""
 
+import json
 import logging
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-# Configure logging
+# Ensure logs directory exists
+logs_dir = Path("/app/data/logs") if Path("/app").exists() else Path("data/logs")
+logs_dir.mkdir(parents=True, exist_ok=True)
+
+# Configure logging with both file and console handlers
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        # Console handler (for docker logs and local dev)
+        logging.StreamHandler(),
+        # Combined log file (all levels INFO and above)
+        RotatingFileHandler(
+            logs_dir / "alima.log",
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=5,
+        ),
+        # Error log file (errors and critical only)
+        RotatingFileHandler(
+            logs_dir / "alima-error.log",
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=5,
+        ),
+    ],
 )
+
+# Configure error handler to only log WARNING and above
+error_handler = logging.getLogger().handlers[2]  # Third handler is error log
+error_handler.setLevel(logging.WARNING)
 
 # Silence noisy loggers
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
 logging.getLogger("sqlalchemy.dialects").setLevel(logging.WARNING)
+logging.getLogger("apscheduler.scheduler").setLevel(logging.ERROR)
+logging.getLogger("apscheduler.executors.default").setLevel(logging.ERROR)
+logging.getLogger("audible.auth").setLevel(logging.WARNING)
+
+
+def format_dict_pretty(data: dict) -> str:
+    """Format a dictionary as pretty-printed JSON for logging."""
+    return "\n" + json.dumps(data, indent=2, default=str)
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware

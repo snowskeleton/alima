@@ -43,7 +43,7 @@ class AudibleSyncService:
         Returns:
             Dictionary with sync statistics
         """
-        logger.info(f"Starting quick sync for account: {account.username}")
+        logger.debug(f"Starting quick sync for account: {account.username}")
 
         try:
             # Load authenticator from file
@@ -66,7 +66,7 @@ class AudibleSyncService:
                 # Format as RFC3339: 2025-01-01T00:00:00Z
                 purchased_after = account.last_sync_timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
                 params["purchased_after"] = purchased_after
-                logger.info(f"Fetching books purchased after {purchased_after}")
+                logger.debug(f"Fetching books purchased after {purchased_after}")
 
             # Fetch library from Audible
             library = client.get("1.0/library", params=params)
@@ -75,7 +75,11 @@ class AudibleSyncService:
                 raise ValueError("Failed to fetch library from Audible API")
 
             items = library.get("items") or []
-            logger.info(f"Found {len(items)} new/updated books in library")
+            # Only log at INFO if we actually found something
+            if items:
+                logger.info(f"Found {len(items)} new/updated books in library")
+            else:
+                logger.debug("Found 0 new/updated books in library")
 
             stats = {
                 "total": len(items),
@@ -133,7 +137,7 @@ class AudibleSyncService:
             self.db.commit()
 
             # Verify file integrity for all books
-            logger.info("Verifying file integrity for all books...")
+            logger.debug("Verifying file integrity for all books...")
             integrity_stats = self._verify_file_integrity()
             stats["files_verified"] = integrity_stats["verified"]
             stats["files_missing"] = integrity_stats["missing"]
@@ -142,16 +146,12 @@ class AudibleSyncService:
             stats["reconnected"] = integrity_stats["reconnected"]
             stats["moved_to_unassigned"] = integrity_stats["moved_to_unassigned"]
 
-            logger.info(
-                f"Quick sync complete for {account.username}: "
-                f"{stats['new']} new, {stats['updated']} updated, "
-                f"{stats['queued']} queued for download, "
-                f"{stats['covers_queued']} covers queued, "
-                f"{stats['files_verified']} files verified, "
-                f"{stats['files_missing']} missing files detected and fixed, "
-                f"{stats['reconnected']} orphaned files reconnected, "
-                f"{stats['moved_to_unassigned']} files moved to unassigned"
-            )
+            # Only log completion at INFO if there was actual activity
+            if stats["new"] > 0 or stats["updated"] > 0 or stats["files_fixed"] > 0 or stats["reconnected"] > 0:
+                from ..main import format_dict_pretty
+                logger.info(f"Quick sync complete for {account.username}:{format_dict_pretty(stats)}")
+            else:
+                logger.debug(f"Quick sync complete for {account.username}: no changes")
 
             return stats
 
@@ -253,7 +253,7 @@ class AudibleSyncService:
             self.db.commit()
 
             # Verify file integrity for all books
-            logger.info("Verifying file integrity for all books...")
+            logger.debug("Verifying file integrity for all books...")
             integrity_stats = self._verify_file_integrity()
             stats["files_verified"] = integrity_stats["verified"]
             stats["files_missing"] = integrity_stats["missing"]
@@ -262,15 +262,9 @@ class AudibleSyncService:
             stats["reconnected"] = integrity_stats["reconnected"]
             stats["moved_to_unassigned"] = integrity_stats["moved_to_unassigned"]
 
-            logger.info(
-                f"Sync complete for {account.username}: "
-                f"{stats['new']} new, {stats['updated']} updated, "
-                f"{stats['queued']} queued for download, "
-                f"{stats['files_verified']} files verified, "
-                f"{stats['files_missing']} missing files detected and fixed, "
-                f"{stats['reconnected']} orphaned files reconnected, "
-                f"{stats['moved_to_unassigned']} files moved to unassigned"
-            )
+            # Full sync always logs at INFO (it's a significant operation)
+            from ..main import format_dict_pretty
+            logger.info(f"Full sync complete for {account.username}:{format_dict_pretty(stats)}")
 
             return stats
 
@@ -528,7 +522,7 @@ class AudibleSyncService:
         }
 
         # PART 1: Check books that claim to have files
-        logger.info("Checking books marked as downloaded...")
+        logger.debug("Checking books marked as downloaded...")
         books_with_files = self.db.query(Book).filter(Book.file_path.isnot(None)).all()
 
         for book in books_with_files:
@@ -558,7 +552,7 @@ class AudibleSyncService:
                 stats["fixed"] += 1
 
         # PART 2: Check for orphaned files (files that exist but aren't in database)
-        logger.info("Checking for orphaned files in audiobooks directory...")
+        logger.debug("Checking for orphaned files in audiobooks directory...")
 
         # Get all books without files for matching
         books_without_files = self.db.query(Book).filter(Book.file_path.is_(None)).all()
@@ -667,14 +661,12 @@ class AudibleSyncService:
                     except Exception as e:
                         logger.error(f"Failed to move unmatched file '{file_path.name}': {e}")
 
-        # Commit all changes
-        if stats["fixed"] > 0 or stats["reconnected"] > 0:
+        # Commit all changes and log results if there was activity
+        if stats["fixed"] > 0 or stats["reconnected"] > 0 or stats["moved_to_unassigned"] > 0:
             self.db.commit()
-            logger.info(
-                f"File integrity check complete: "
-                f"{stats['fixed']} missing files cleared, "
-                f"{stats['reconnected']} orphaned files reconnected, "
-                f"{stats['moved_to_unassigned']} files moved to unassigned"
-            )
+            from ..main import format_dict_pretty
+            logger.info(f"File integrity check found issues:{format_dict_pretty(stats)}")
+        else:
+            logger.debug("File integrity check complete: no issues found")
 
         return stats
