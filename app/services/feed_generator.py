@@ -175,16 +175,23 @@ class FeedGeneratorService:
         # Format title with series info
         title = book.title
 
-        # Remove "(Unabridged)" but keep "(Abridged)" if present
-        if title.endswith("(Unabridged)"):
+        # Remove " (Unabridged)" but keep " (Abridged)" if present
+        # Note: Audible includes a space before the parenthesis
+        if title.endswith(" (Unabridged)"):
+            title = title[:-14].strip()
+        elif title.endswith("(Unabridged)"):
+            # Fallback for titles without the space
             title = title[:-13].strip()
 
-        # Add series info to title if available
+        # Add series info to title if available (only if not already present)
         if book.series:
             series_text = book.series
             if book.series_position:
                 series_text += f", Book {book.series_position}"
-            title = f"{title}: {series_text}"
+
+            # Only add series info if it's not already in the title
+            if series_text not in title:
+                title = f"{title}: {series_text}"
 
         SubElement(item, "title").text = title
         SubElement(item, "link").text = f"{domain}/library/{book.id}"
