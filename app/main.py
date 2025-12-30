@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -53,6 +54,9 @@ logging.getLogger("audible.auth").setLevel(logging.WARNING)
 def format_dict_pretty(data: dict) -> str:
     """Format a dictionary as pretty-printed JSON for logging."""
     return "\n" + json.dumps(data, indent=2, default=str)
+
+logger = logging.getLogger(__name__)
+
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -109,47 +113,83 @@ class NoIndexMiddleware(BaseHTTPMiddleware):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Application lifespan manager.
+    Application lifespan manager with leader election.
 
-    Handles startup and shutdown events.
+    Only the leader worker runs migrations, starts scheduler, etc.
     """
     # Skip initialization in test mode (tests manage their own database)
     if settings.environment != "testing":
-        # Startup: Initialize database
-        init_db()
-        print("✓ Database initialized")
+        # Import leader election module
+        from .leader_election import LeaderElection
 
-        # Run pending migrations
-        from .database import SessionLocal
-        from .migrations_runner import run_all_pending_migrations
+        # Try to acquire leadership
+        is_leader = LeaderElection.try_acquire_leadership()
 
-        db = SessionLocal()
-        try:
-            run_all_pending_migrations(db)
-            print("✓ Database migrations applied")
-        except Exception as e:
-            print(f"⚠ Warning: Migration error (continuing anyway): {e}")
-        finally:
-            db.close()
+        if is_leader:
+            # === LEADER TASKS ===
+            logger.info(f"Worker {os.getpid()} is LEADER - running startup tasks")
 
-        # Ensure data directories exist
-        settings.audiobooks_path.mkdir(parents=True, exist_ok=True)
-        settings.covers_path.mkdir(parents=True, exist_ok=True)
-        settings.audible_auth_path.mkdir(parents=True, exist_ok=True)
-        settings.temp_path.mkdir(parents=True, exist_ok=True)
-        print("✓ Data directories created")
+            # Initialize database
+            init_db()
+            print("✓ Database initialized")
 
-        # Start background scheduler
-        from .workers.scheduler import start_scheduler, stop_scheduler
+            # Run pending migrations (LEADER ONLY)
+            from .database import SessionLocal
+            from .migrations_runner import run_all_pending_migrations
 
-        start_scheduler()
-        print("✓ Background scheduler started")
+            db = SessionLocal()
+            try:
+                run_all_pending_migrations(db)
+                print("✓ Database migrations applied")
+            except Exception as e:
+                print(f"⚠ Warning: Migration error (continuing anyway): {e}")
+            finally:
+                db.close()
+
+            # Ensure data directories exist
+            settings.audiobooks_path.mkdir(parents=True, exist_ok=True)
+            settings.covers_path.mkdir(parents=True, exist_ok=True)
+            settings.audible_auth_path.mkdir(parents=True, exist_ok=True)
+            settings.temp_path.mkdir(parents=True, exist_ok=True)
+            print("✓ Data directories created")
+
+            # Start background scheduler (LEADER ONLY)
+            from .workers.scheduler import start_scheduler, stop_scheduler
+
+            start_scheduler()
+            print("✓ Background scheduler started")
+
+        else:
+            # === FOLLOWER TASKS ===
+            logger.info(f"Worker {os.getpid()} is FOLLOWER - skipping startup tasks")
+
+            # Wait briefly for leader to initialize database
+            import time
+            time.sleep(2)
+
+            # Ensure data directories exist (safe for all workers)
+            settings.audiobooks_path.mkdir(parents=True, exist_ok=True)
+            settings.covers_path.mkdir(parents=True, exist_ok=True)
+            settings.audible_auth_path.mkdir(parents=True, exist_ok=True)
+            settings.temp_path.mkdir(parents=True, exist_ok=True)
 
     yield
 
-    # Shutdown: Stop scheduler
+    # === SHUTDOWN ===
     if settings.environment != "testing":
-        stop_scheduler()
+        from .leader_election import LeaderElection
+
+        if LeaderElection.is_leader():
+            # Stop scheduler (LEADER ONLY)
+            from .workers.scheduler import stop_scheduler
+            stop_scheduler()
+            logger.info(f"Worker {os.getpid()} (LEADER) shutting down")
+
+            # Release lock
+            LeaderElection.release_leadership()
+        else:
+            logger.info(f"Worker {os.getpid()} (FOLLOWER) shutting down")
+
     print("Shutting down...")
 
 
