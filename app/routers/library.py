@@ -352,7 +352,7 @@ async def delete_book(
     if book.file_path:
         file_path = Path(book.file_path)
         if not file_path.is_absolute():
-            file_path = settings.audiobooks_path / file_path
+            file_path = settings.audiobooks_path.parent / file_path
 
         if file_path.exists():
             try:
@@ -417,7 +417,7 @@ async def unmatch_book_file(
     # Get the current file path
     file_path = Path(book.file_path)
     if not file_path.is_absolute():
-        file_path = settings.audiobooks_path / file_path
+        file_path = settings.audiobooks_path.parent / file_path
 
     # Get the filename
     filename = file_path.name

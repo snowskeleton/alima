@@ -331,7 +331,7 @@ class BookDownloadService:
             )
 
             # Update book record
-            book.file_path = str(output_file.relative_to(settings.audiobooks_path))
+            book.file_path = str(output_file.relative_to(settings.audiobooks_path.parent))
             book.file_size = output_file.stat().st_size
             book.file_format = "m4a"
             book.downloaded_at = datetime.datetime.now(datetime.timezone.utc)

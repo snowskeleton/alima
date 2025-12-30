@@ -36,9 +36,9 @@ async def serve_audiobook(
     # Construct file path
     file_path = Path(book.file_path)
 
-    # If file_path is relative, make it absolute relative to audiobooks_path
+    # If file_path is relative, make it absolute relative to audiobooks_path parent
     if not file_path.is_absolute():
-        file_path = settings.audiobooks_path / file_path
+        file_path = settings.audiobooks_path.parent / file_path
 
     if not file_path.exists():
         raise HTTPException(
