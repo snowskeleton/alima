@@ -101,6 +101,8 @@ async def get_matches(
             "id": book.id,
             "title": book.title,
             "author": book.author,
+            "series": book.series,
+            "series_position": book.series_position,
         }
         for book in available_books
     ]

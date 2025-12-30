@@ -43,15 +43,14 @@
             <thead>
                 <tr>
                     <th style="width: 3%;"><input type="checkbox" id="selectAll" class="select-all-checkbox"></th>
-                    <th class="sortable" data-sort="filename" style="width: 25%;">
+                    <th class="sortable" data-sort="filename" style="width: 22%;">
                         File Name <span class="sort-indicator"></span>
                     </th>
-                    <th style="width: 15%;">File Info</th>
+                    <th style="width: 35%;">Suggested Match / Override</th>
                     <th class="sortable" data-sort="confidence" style="width: 8%;">
                         Match % <span class="sort-indicator"></span>
                     </th>
-                    <th style="width: 24%;">Suggested Match</th>
-                    <th style="width: 25%;">Override / Select Different</th>
+                    <th style="width: 15%;">File Info</th>
                 </tr>
             </thead>
             <tbody id="filesBody">
@@ -167,6 +166,51 @@ function populateTable() {
         filenameCell.className = 'filename-cell';
         filenameCell.innerHTML = `<div class="filename">${escapeHtml(file.filename)}</div>`;
 
+        // Suggested match / Override (combined column)
+        const matchCell = document.createElement('td');
+        matchCell.className = 'match-cell';
+
+        const initialTitle = file.suggested_book ? file.suggested_book.title : '';
+        const initialBookId = file.suggested_book ? file.suggested_book.id : '';
+        const bookDetailsId = `book-details-${index}`;
+
+        let bookDetailsHtml = '';
+        if (file.suggested_book) {
+            const book = file.suggested_book;
+            bookDetailsHtml = `
+                ${book.author ? `<div class="book-author">by ${escapeHtml(book.author)}</div>` : ''}
+                ${book.series ? `<div class="book-series">${escapeHtml(book.series)}${book.series_position ? ' #' + book.series_position : ''}</div>` : ''}
+            `;
+        }
+
+        matchCell.innerHTML = `
+            <div class="autocomplete-wrapper">
+                <input
+                    type="text"
+                    id="${searchId}"
+                    class="book-search"
+                    placeholder="Search for book..."
+                    value="${escapeHtml(initialTitle)}"
+                    data-book-id="${initialBookId}"
+                    autocomplete="off"
+                />
+                <div id="${resultsId}" class="autocomplete-results"></div>
+            </div>
+            <div id="${bookDetailsId}" class="book-details">
+                ${bookDetailsHtml}
+            </div>
+        `;
+
+        // Setup autocomplete after adding to DOM
+        setTimeout(() => setupAutocomplete(searchId, resultsId, bookDetailsId, index), 0);
+
+        // Confidence
+        const confidenceCell = document.createElement('td');
+        confidenceCell.className = 'confidence-cell';
+        const conf = file.confidence || 0;
+        const badgeClass = conf >= 85 ? 'badge-success' : conf >= 50 ? 'badge-warning' : 'badge-secondary';
+        confidenceCell.innerHTML = `<span class="badge ${badgeClass}">${Math.round(conf)}%</span>`;
+
         // File info (metadata)
         const infoCell = document.createElement('td');
         infoCell.className = 'file-info-cell';
@@ -184,59 +228,11 @@ function populateTable() {
             </details>
         `;
 
-        // Confidence
-        const confidenceCell = document.createElement('td');
-        confidenceCell.className = 'confidence-cell';
-        const conf = file.confidence || 0;
-        const badgeClass = conf >= 85 ? 'badge-success' : conf >= 50 ? 'badge-warning' : 'badge-secondary';
-        confidenceCell.innerHTML = `<span class="badge ${badgeClass}">${Math.round(conf)}%</span>`;
-
-        // Suggested match
-        const suggestedCell = document.createElement('td');
-        suggestedCell.className = 'suggested-cell';
-        if (file.suggested_book) {
-            const book = file.suggested_book;
-            suggestedCell.innerHTML = `
-                <a href="/library/${book.id}" class="book-link" target="_blank">${escapeHtml(book.title)}</a>
-                ${book.author ? `<div class="book-author">by ${escapeHtml(book.author)}</div>` : ''}
-                ${book.series ? `<div class="book-series">${escapeHtml(book.series)}${book.series_position ? ' #' + book.series_position : ''}</div>` : ''}
-            `;
-        } else {
-            suggestedCell.innerHTML = '<span class="no-match">No match found</span>';
-        }
-
-        // Override selection
-        const overrideCell = document.createElement('td');
-        overrideCell.className = 'override-cell';
-
-        const initialValue = file.suggested_book ?
-            `${file.suggested_book.title}${file.suggested_book.author ? ' - ' + file.suggested_book.author : ''}` : '';
-        const initialBookId = file.suggested_book ? file.suggested_book.id : '';
-
-        overrideCell.innerHTML = `
-            <div class="autocomplete-wrapper">
-                <input
-                    type="text"
-                    id="${searchId}"
-                    class="book-search"
-                    placeholder="Search to override..."
-                    value="${escapeHtml(initialValue)}"
-                    data-book-id="${initialBookId}"
-                    autocomplete="off"
-                />
-                <div id="${resultsId}" class="autocomplete-results"></div>
-            </div>
-        `;
-
-        // Setup autocomplete after adding to DOM
-        setTimeout(() => setupAutocomplete(searchId, resultsId, index), 0);
-
         tr.appendChild(checkboxCell);
         tr.appendChild(filenameCell);
-        tr.appendChild(infoCell);
+        tr.appendChild(matchCell);
         tr.appendChild(confidenceCell);
-        tr.appendChild(suggestedCell);
-        tr.appendChild(overrideCell);
+        tr.appendChild(infoCell);
 
         tbody.appendChild(tr);
     });
@@ -245,11 +241,40 @@ function populateTable() {
     setupCheckboxHandlers();
 }
 
-function setupAutocomplete(searchId, resultsId, fileIndex) {
+function setupAutocomplete(searchId, resultsId, bookDetailsId, fileIndex) {
     const input = document.getElementById(searchId);
     const resultsDiv = document.getElementById(resultsId);
+    const detailsDiv = document.getElementById(bookDetailsId);
 
-    if (!input || !resultsDiv) return;
+    if (!input || !resultsDiv || !detailsDiv) return;
+
+    function updateBookDetails(bookId) {
+        if (!bookId) {
+            detailsDiv.innerHTML = '';
+            return;
+        }
+
+        // Find book in suggested book data or available books
+        const file = allFiles[fileIndex];
+        let book = null;
+
+        if (file.suggested_book && file.suggested_book.id == bookId) {
+            book = file.suggested_book;
+        } else {
+            book = availableBooks.find(b => b.id == bookId);
+        }
+
+        if (book) {
+            let detailsHtml = '';
+            if (book.author) {
+                detailsHtml += `<div class="book-author">by ${escapeHtml(book.author)}</div>`;
+            }
+            if (book.series) {
+                detailsHtml += `<div class="book-series">${escapeHtml(book.series)}${book.series_position ? ' #' + book.series_position : ''}</div>`;
+            }
+            detailsDiv.innerHTML = detailsHtml;
+        }
+    }
 
     input.addEventListener('input', function() {
         const query = this.value.toLowerCase().trim();
@@ -260,9 +285,12 @@ function setupAutocomplete(searchId, resultsId, fileIndex) {
             // Reset to original suggestion if exists
             const file = allFiles[fileIndex];
             if (file.suggested_book) {
+                this.value = file.suggested_book.title;
                 this.dataset.bookId = file.suggested_book.id;
+                updateBookDetails(file.suggested_book.id);
             } else {
                 this.dataset.bookId = '';
+                updateBookDetails('');
             }
             return;
         }
@@ -294,8 +322,9 @@ function setupAutocomplete(searchId, resultsId, fileIndex) {
                     const bookId = item.dataset.bookId;
                     const book = availableBooks.find(b => b.id == bookId);
                     if (book) {
-                        input.value = `${book.title}${book.author ? ' - ' + book.author : ''}`;
+                        input.value = book.title;
                         input.dataset.bookId = bookId;
+                        updateBookDetails(bookId);
                         resultsDiv.innerHTML = '';
                         resultsDiv.style.display = 'none';
                     }
@@ -311,6 +340,11 @@ function setupAutocomplete(searchId, resultsId, fileIndex) {
             resultsDiv.style.display = 'none';
         }
     });
+
+    // Initialize details on load
+    if (input.dataset.bookId) {
+        updateBookDetails(input.dataset.bookId);
+    }
 }
 
 function setupCheckboxHandlers() {
@@ -373,6 +407,7 @@ async function confirmSelectedMatches() {
 
     let success = 0;
     let failed = 0;
+    const processedFilenames = []; // Track successfully processed files
 
     for (const checkbox of checked) {
         const index = parseInt(checkbox.dataset.index);
@@ -395,12 +430,9 @@ async function confirmSelectedMatches() {
             if (response.redirected || response.ok) {
                 success++;
                 matchedBookIds.add(parseInt(bookId));
+                processedFilenames.push(file.filename);
                 row.style.opacity = '0.3';
-                setTimeout(() => {
-                    row.remove();
-                    allFiles.splice(index, 1);
-                    updateFileCount(-1);
-                }, 300);
+                setTimeout(() => row.remove(), 300);
             } else {
                 failed++;
             }
@@ -410,7 +442,11 @@ async function confirmSelectedMatches() {
         }
     }
 
-    if (success > 0 || failed > 0) {
+    if (success > 0) {
+        // Remove successfully processed files from allFiles array
+        allFiles = allFiles.filter(file => !processedFilenames.includes(file.filename));
+        updateFileCount(-success);
+
         setTimeout(() => {
             populateTable(); // Refresh to fix indices
             updateBatchButtons();
@@ -428,6 +464,7 @@ async function importSelectedAsNew() {
 
     let success = 0;
     let failed = 0;
+    const processedFilenames = []; // Track successfully processed files
 
     for (const checkbox of checked) {
         const index = parseInt(checkbox.dataset.index);
@@ -441,12 +478,9 @@ async function importSelectedAsNew() {
 
             if (response.redirected || response.ok) {
                 success++;
+                processedFilenames.push(file.filename);
                 row.style.opacity = '0.3';
-                setTimeout(() => {
-                    row.remove();
-                    allFiles.splice(index, 1);
-                    updateFileCount(-1);
-                }, 300);
+                setTimeout(() => row.remove(), 300);
             } else {
                 failed++;
             }
@@ -456,7 +490,11 @@ async function importSelectedAsNew() {
         }
     }
 
-    if (success > 0 || failed > 0) {
+    if (success > 0) {
+        // Remove successfully processed files from allFiles array
+        allFiles = allFiles.filter(file => !processedFilenames.includes(file.filename));
+        updateFileCount(-success);
+
         setTimeout(() => {
             populateTable(); // Refresh to fix indices
             updateBatchButtons();
@@ -767,15 +805,12 @@ document.addEventListener('DOMContentLoaded', function() {
     color: #374151;
 }
 
-.suggested-cell .book-link {
-    color: #1f2937;
-    text-decoration: none;
-    font-weight: 500;
+.match-cell {
+    min-width: 250px;
 }
 
-.suggested-cell .book-link:hover {
-    color: #3b82f6;
-    text-decoration: underline;
+.book-details {
+    margin-top: 0.5rem;
 }
 
 .book-author,
@@ -783,15 +818,6 @@ document.addEventListener('DOMContentLoaded', function() {
     font-size: 0.8125rem;
     color: #6b7280;
     margin-top: 0.25rem;
-}
-
-.no-match {
-    color: #9ca3af;
-    font-style: italic;
-}
-
-.override-cell {
-    min-width: 200px;
 }
 
 .autocomplete-wrapper {
