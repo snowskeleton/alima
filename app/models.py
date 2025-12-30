@@ -68,8 +68,8 @@ class DownloadStatus(str, PyEnum):
 class DownloadType(str, PyEnum):
     """Download type enumeration."""
 
-    BOOK = "book"
-    COVER = "cover"
+    BOOK = "BOOK"
+    COVER = "COVER"
 
 
 class ReplicationMode(str, PyEnum):

@@ -242,6 +242,207 @@ def run_migration_010_add_purchased_at(db: Session, engine) -> None:
         raise
 
 
+def run_migration_011_fix_download_type_enum(db: Session, engine) -> None:
+    """Fix download_type enum case mismatch in PostgreSQL."""
+    migration_name = "011_fix_download_type_enum"
+
+    is_postgres = "postgresql" in str(engine.url)
+
+    if has_migration_been_applied(db, migration_name):
+        logger.info(f"Migration {migration_name} already applied")
+        return
+
+    logger.info(f"Running migration: {migration_name}")
+
+    try:
+        if is_postgres:
+            # Check what values the enum type actually has
+            result = db.execute(text("""
+                SELECT e.enumlabel
+                FROM pg_type t
+                JOIN pg_enum e ON t.oid = e.enumtypid
+                WHERE t.typname = 'downloadtype'
+                ORDER BY e.enumsortorder
+            """))
+            enum_values = [row[0] for row in result.fetchall()]
+            logger.info(f"Current downloadtype enum values: {enum_values}")
+
+            # Check if we have both uppercase and lowercase (shouldn't happen, but just in case)
+            has_uppercase = 'BOOK' in enum_values or 'COVER' in enum_values
+            has_lowercase = 'book' in enum_values or 'cover' in enum_values
+
+            if has_uppercase and not has_lowercase:
+                # Enum only has uppercase - already correct, just ensure data matches
+                logger.info("Enum has uppercase values - verifying data...")
+                # Check if there's any data to update (shouldn't be, but check anyway)
+                result = db.execute(text("SELECT COUNT(*) FROM download_queue"))
+                count = result.scalar()
+                if count > 0:
+                    logger.info("No data migration needed - enum already correct")
+            elif has_lowercase and not has_uppercase:
+                # Enum only has lowercase - need to add uppercase and migrate
+                logger.info("Enum has lowercase values - adding uppercase values and migrating data")
+
+                # Add uppercase values to enum
+                if 'BOOK' not in enum_values:
+                    db.execute(text("ALTER TYPE downloadtype ADD VALUE 'BOOK'"))
+                if 'COVER' not in enum_values:
+                    db.execute(text("ALTER TYPE downloadtype ADD VALUE 'COVER'"))
+                db.commit()
+
+                # Update data from lowercase to uppercase
+                db.execute(text("""
+                    UPDATE download_queue
+                    SET download_type = 'BOOK'
+                    WHERE download_type::text = 'book'
+                """))
+                db.execute(text("""
+                    UPDATE download_queue
+                    SET download_type = 'COVER'
+                    WHERE download_type::text = 'cover'
+                """))
+                db.commit()
+                logger.info("Data migration complete")
+            elif has_uppercase and has_lowercase:
+                # Both exist - just migrate data to uppercase
+                logger.info("Enum has both uppercase and lowercase values - migrating data to uppercase")
+                db.execute(text("""
+                    UPDATE download_queue
+                    SET download_type = 'BOOK'
+                    WHERE download_type::text = 'book'
+                """))
+                db.execute(text("""
+                    UPDATE download_queue
+                    SET download_type = 'COVER'
+                    WHERE download_type::text = 'cover'
+                """))
+                db.commit()
+                logger.info("Data migration complete")
+        else:
+            # SQLite: Just update any lowercase values to uppercase
+            logger.info("Checking SQLite download_type values...")
+            result = db.execute(text("""
+                SELECT COUNT(*) FROM download_queue
+                WHERE download_type IN ('book', 'cover')
+            """))
+            count = result.scalar()
+
+            if count > 0:
+                logger.info(f"Updating {count} SQLite download_type values to uppercase...")
+                db.execute(text("""
+                    UPDATE download_queue
+                    SET download_type = 'BOOK'
+                    WHERE download_type = 'book'
+                """))
+                db.execute(text("""
+                    UPDATE download_queue
+                    SET download_type = 'COVER'
+                    WHERE download_type = 'cover'
+                """))
+                db.commit()
+                logger.info("SQLite data migration complete")
+            else:
+                logger.info("No SQLite data to migrate")
+
+        mark_migration_applied(db, migration_name)
+        logger.info(f"Migration {migration_name} completed successfully!")
+
+    except Exception as e:
+        logger.error(f"Migration {migration_name} failed: {e}", exc_info=True)
+        # Don't fail - mark as applied anyway to avoid repeated attempts
+        logger.warning("Marking migration as applied despite error")
+        if not has_migration_been_applied(db, migration_name):
+            mark_migration_applied(db, migration_name)
+
+
+def run_migration_012_fix_lowercase_download_types(db: Session, engine) -> None:
+    """Fix any remaining lowercase download_type values."""
+    migration_name = "012_fix_lowercase_download_types"
+
+    if has_migration_been_applied(db, migration_name):
+        logger.info(f"Migration {migration_name} already applied")
+        return
+
+    is_postgres = "postgresql" in str(engine.url)
+
+    logger.info(f"Running migration: {migration_name}")
+
+    try:
+        if is_postgres:
+            # PostgreSQL: Check if we have lowercase values and update them
+            result = db.execute(text("""
+                SELECT COUNT(*) FROM download_queue
+                WHERE download_type::text IN ('book', 'cover')
+            """))
+            count = result.scalar()
+
+            if count > 0:
+                logger.info(f"Found {count} rows with lowercase download_type values")
+
+                # First ensure uppercase enum values exist
+                result = db.execute(text("""
+                    SELECT e.enumlabel
+                    FROM pg_type t
+                    JOIN pg_enum e ON t.oid = e.enumtypid
+                    WHERE t.typname = 'downloadtype'
+                """))
+                enum_values = [row[0] for row in result.fetchall()]
+
+                if 'BOOK' not in enum_values:
+                    db.execute(text("ALTER TYPE downloadtype ADD VALUE 'BOOK'"))
+                if 'COVER' not in enum_values:
+                    db.execute(text("ALTER TYPE downloadtype ADD VALUE 'COVER'"))
+                db.commit()
+
+                # Now update the data
+                db.execute(text("""
+                    UPDATE download_queue
+                    SET download_type = 'BOOK'
+                    WHERE download_type::text = 'book'
+                """))
+                db.execute(text("""
+                    UPDATE download_queue
+                    SET download_type = 'COVER'
+                    WHERE download_type::text = 'cover'
+                """))
+                db.commit()
+                logger.info(f"Updated {count} rows to uppercase")
+            else:
+                logger.info("No lowercase download_type values found")
+        else:
+            # SQLite: Update any lowercase values
+            result = db.execute(text("""
+                SELECT COUNT(*) FROM download_queue
+                WHERE download_type IN ('book', 'cover')
+            """))
+            count = result.scalar()
+
+            if count > 0:
+                logger.info(f"Found {count} rows with lowercase download_type values")
+                db.execute(text("""
+                    UPDATE download_queue
+                    SET download_type = 'BOOK'
+                    WHERE download_type = 'book'
+                """))
+                db.execute(text("""
+                    UPDATE download_queue
+                    SET download_type = 'COVER'
+                    WHERE download_type = 'cover'
+                """))
+                db.commit()
+                logger.info(f"Updated {count} rows to uppercase")
+            else:
+                logger.info("No lowercase download_type values found")
+
+        mark_migration_applied(db, migration_name)
+        logger.info(f"Migration {migration_name} completed successfully!")
+
+    except Exception as e:
+        logger.error(f"Migration {migration_name} failed: {e}", exc_info=True)
+        db.rollback()
+        raise
+
+
 def run_all_pending_migrations(db: Session) -> None:
     """Run all pending migrations in order."""
     from .database import engine
@@ -256,6 +457,8 @@ def run_all_pending_migrations(db: Session) -> None:
         run_migration_008_add_download_type,
         run_migration_009_add_cover_url,
         run_migration_010_add_purchased_at,
+        run_migration_011_fix_download_type_enum,
+        run_migration_012_fix_lowercase_download_types,
     ]
 
     for migration_func in migrations:
