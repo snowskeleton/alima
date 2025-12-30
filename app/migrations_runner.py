@@ -453,7 +453,7 @@ def run_migration_013_add_indexes_and_cascades(db: Session, engine) -> None:
     """
     migration_name = "013_add_indexes_and_cascades"
 
-    if is_migration_applied(db, migration_name):
+    if has_migration_been_applied(db, migration_name):
         logger.info(f"Migration {migration_name} already applied, skipping")
         return
 

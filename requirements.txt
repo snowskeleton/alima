@@ -9,7 +9,7 @@ sse-starlette==3.0.4
 # Database
 sqlalchemy==2.0.45
 alembic==1.17.2
-psycopg[binary]
+psycopg2-binary
 
 # Auth & Security
 passlib[bcrypt]==1.7.4
