@@ -31,7 +31,7 @@
         <div class="feed-info">
             <div class="feed-title-row">
                 <h1>{{ feed.name }}</h1>
-                {% if feed.user_id == current_user.id or (current_user.role.value == 'admin' and feed.is_system) %}
+                {% if current_user and (feed.user_id == current_user.id or (current_user.role.value == 'admin' and feed.is_system)) %}
                 <a href="/feeds/{{ feed.id }}/edit" class="btn btn-edit">Edit Feed</a>
                 {% endif %}
             </div>
