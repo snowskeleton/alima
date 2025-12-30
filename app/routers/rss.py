@@ -5,7 +5,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
-from ..models import Feed
+from ..models import Feed, FeedBook
 from ..services.feed_generator import FeedGeneratorService
 
 router = APIRouter(prefix="/feeds", tags=["RSS"])
@@ -21,7 +21,7 @@ async def get_rss_feed(slug: str, db: Session = Depends(get_db)):
     # Find feed by slug with eager loading to prevent N+1 queries
     feed = (
         db.query(Feed)
-        .options(joinedload(Feed.feed_books).joinedload("book"))
+        .options(joinedload(Feed.feed_books).joinedload(FeedBook.book))
         .filter(Feed.slug == slug)
         .first()
     )
@@ -63,7 +63,7 @@ async def preview_rss_feed(slug: str, db: Session = Depends(get_db)):
     # Find feed by slug with eager loading to prevent N+1 queries
     feed = (
         db.query(Feed)
-        .options(joinedload(Feed.feed_books).joinedload("book"))
+        .options(joinedload(Feed.feed_books).joinedload(FeedBook.book))
         .filter(Feed.slug == slug)
         .first()
     )
