@@ -266,3 +266,39 @@ async def batch_import_unmatched(
         url="/admin/match-books",
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+@router.post("/{filename}/delete")
+async def delete_unassigned_file(
+    request: Request,
+    filename: str,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete an unassigned audiobook file."""
+    from pathlib import Path
+    from ..config import settings
+
+    # Define the unassigned directory
+    unassigned_dir = settings.audiobooks_path / "unassigned"
+    file_path = unassigned_dir / filename
+
+    # Check if file exists
+    if not file_path.exists():
+        return JSONResponse(
+            content={"error": "File not found"},
+            status_code=404,
+        )
+
+    try:
+        # Delete the file
+        file_path.unlink()
+        return JSONResponse(
+            content={"success": True, "message": f"File '{filename}' deleted successfully"},
+            status_code=200,
+        )
+    except Exception as e:
+        return JSONResponse(
+            content={"error": f"Failed to delete file: {str(e)}"},
+            status_code=500,
+        )

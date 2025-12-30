@@ -27,6 +27,9 @@
         <button onclick="importSelectedAsNew()" class="btn-import-batch" id="importBtn" disabled>
             Import Selected as New
         </button>
+        <button onclick="deleteSelectedFiles()" class="btn-delete-batch" id="deleteBtn" disabled>
+            Delete Selected Files
+        </button>
     </div>
 </div>
 
@@ -387,17 +390,22 @@ function updateBatchButtons() {
     const checked = document.querySelectorAll('.row-checkbox:checked');
     const confirmBtn = document.getElementById('confirmBtn');
     const importBtn = document.getElementById('importBtn');
+    const deleteBtn = document.getElementById('deleteBtn');
 
     if (checked.length > 0) {
         confirmBtn.disabled = false;
         importBtn.disabled = false;
+        deleteBtn.disabled = false;
         confirmBtn.textContent = `Confirm Selected Matches (${checked.length})`;
         importBtn.textContent = `Import Selected as New (${checked.length})`;
+        deleteBtn.textContent = `Delete Selected Files (${checked.length})`;
     } else {
         confirmBtn.disabled = true;
         importBtn.disabled = true;
+        deleteBtn.disabled = true;
         confirmBtn.textContent = 'Confirm Selected Matches';
         importBtn.textContent = 'Import Selected as New';
+        deleteBtn.textContent = 'Delete Selected Files';
     }
 }
 
@@ -499,6 +507,58 @@ async function importSelectedAsNew() {
             populateTable(); // Refresh to fix indices
             updateBatchButtons();
         }, 400);
+    }
+}
+
+async function deleteSelectedFiles() {
+    const checked = document.querySelectorAll('.row-checkbox:checked');
+    if (checked.length === 0) return;
+
+    if (!confirm(`Permanently delete ${checked.length} file(s)? This cannot be undone.`)) {
+        return;
+    }
+
+    let success = 0;
+    let failed = 0;
+    const deletedFilenames = []; // Track successfully deleted files
+
+    for (const checkbox of checked) {
+        const index = parseInt(checkbox.dataset.index);
+        const file = allFiles[index];
+        const row = checkbox.closest('tr');
+
+        try {
+            const response = await fetch(`/admin/match-books/${encodeURIComponent(file.filename)}/delete`, {
+                method: 'POST',
+            });
+
+            if (response.ok) {
+                success++;
+                deletedFilenames.push(file.filename);
+                row.style.opacity = '0.3';
+                setTimeout(() => row.remove(), 300);
+            } else {
+                failed++;
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            failed++;
+        }
+    }
+
+    if (success > 0) {
+        // Remove successfully deleted files from allFiles array
+        allFiles = allFiles.filter(file => !deletedFilenames.includes(file.filename));
+        updateFileCount(-success);
+
+        setTimeout(() => {
+            populateTable(); // Refresh to fix indices
+            updateBatchButtons();
+        }, 400);
+    }
+
+    if (failed > 0) {
+        alert(`Failed to delete ${failed} file(s). Check console for details.`);
     }
 }
 
@@ -625,7 +685,8 @@ document.addEventListener('DOMContentLoaded', function() {
 }
 
 .btn-confirm-batch,
-.btn-import-batch {
+.btn-import-batch,
+.btn-delete-batch {
     padding: 0.5rem 1rem;
     border-radius: 4px;
     border: none;
@@ -654,8 +715,18 @@ document.addEventListener('DOMContentLoaded', function() {
     background: #4b5563;
 }
 
+.btn-delete-batch {
+    background: #dc2626;
+    color: white;
+}
+
+.btn-delete-batch:hover:not(:disabled) {
+    background: #b91c1c;
+}
+
 .btn-confirm-batch:disabled,
-.btn-import-batch:disabled {
+.btn-import-batch:disabled,
+.btn-delete-batch:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }
