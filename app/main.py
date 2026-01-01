@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -265,7 +266,7 @@ app.add_middleware(
     cookie_name="alima_csrf",
     cookie_secure=settings.domain.startswith("https://"),
     cookie_samesite="lax",
-    exempt_urls=["/health"],  # Health check doesn't need CSRF
+    exempt_urls=[re.compile(r"^/health$")],  # Health check doesn't need CSRF (regex pattern required)
 )
 
 # Force HTTPS URLs when DOMAIN is set to HTTPS
