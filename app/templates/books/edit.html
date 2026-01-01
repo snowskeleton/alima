@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_csrf.html" import csrf_token %}
 
 {% block title %}Edit {{ book.title }} - Alima{% endblock %}
 
@@ -8,6 +9,7 @@
 </div>
 
 <form action="/books/{{ book.id }}/update-metadata" method="POST">
+    {{ csrf_token(request) }}
     <div class="form-group">
         <label class="form-label">Title</label>
         <input type="text" name="title" class="form-input" value="{{ book.title }}">

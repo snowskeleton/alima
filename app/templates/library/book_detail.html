@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_csrf.html" import csrf_token %}
 
 {% block title %}{{ metadata.title }} - Alima{% endblock %}
 
@@ -169,6 +170,7 @@
             {% elif book.download_unavailable %}
             <!-- Book marked as unavailable - show retry button -->
             <form action="/library/{{ book.id }}/mark-available" method="POST" style="display: inline;">
+                {{ csrf_token(request) }}
                 <button type="submit" class="btn btn-secondary">
                     🔄 Mark as Available (Retry)
                 </button>
@@ -176,6 +178,7 @@
             {% elif book.download_enabled and book.source.value == 'audible' %}
             <!-- Not downloaded and downloads enabled - show download now button -->
             <form action="/library/{{ book.id }}/download" method="POST" style="display: inline;">
+                {{ csrf_token(request) }}
                 <button type="submit" class="btn btn-primary">
                     ⬇️ Download Now
                 </button>
@@ -185,6 +188,7 @@
             <!-- Toggle download enabled/disabled -->
             {% if book.source.value == 'audible' and not book.file_path and not book.download_unavailable %}
             <form action="/library/{{ book.id }}/toggle-download" method="POST" style="display: inline;">
+                {{ csrf_token(request) }}
                 <button type="submit" class="btn {% if book.download_enabled %}btn-warning{% else %}btn-success{% endif %}">
                     {% if book.download_enabled %}
                     🚫 Disable Auto-Download
@@ -198,6 +202,7 @@
             <!-- Unmatch file button -->
             {% if book.file_path %}
             <form action="/library/{{ book.id }}/unmatch" method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to unmatch this file? The file will be moved back to the unassigned folder so you can match it to a different book.');">
+                {{ csrf_token(request) }}
                 <button type="submit" class="btn btn-warning">
                     🔄 Unmatch File
                 </button>
@@ -207,6 +212,7 @@
             <!-- Delete file button -->
             {% if book.file_path %}
             <form action="/library/{{ book.id }}/delete" method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete the downloaded file for \'{{ book.title }}\'? You can re-download it later.');">
+                {{ csrf_token(request) }}
                 <button type="submit" class="btn btn-danger">
                     🗑️ Delete File
                 </button>

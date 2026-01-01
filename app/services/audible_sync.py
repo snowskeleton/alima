@@ -676,19 +676,37 @@ class AudibleSyncService:
                 # Try to match by ASIN (for Audible books)
                 matched_book = None
 
-                # Extract potential ASIN from filename (ASINs are alphanumeric, typically 10 chars)
-                filename_parts = file_path.stem.split('_')
-                for part in filename_parts:
-                    if len(part) == 10 and part.isalnum():
-                        # This might be an ASIN
-                        potential_asin = part
+                # First, try extracting ASIN from file metadata (most reliable)
+                try:
+                    from .metadata import MetadataService
+                    metadata_service = MetadataService()
+                    file_metadata = metadata_service.read_metadata(file_path)
+
+                    if file_metadata and file_metadata.get("asin"):
+                        asin = file_metadata["asin"]
                         matched_book = self.db.query(Book).filter(
-                            Book.asin == potential_asin,
+                            Book.asin == asin,
                             Book.file_path.is_(None)
                         ).first()
                         if matched_book:
-                            logger.info(f"Matched file to book by ASIN: {matched_book.title}")
-                            break
+                            logger.info(f"Matched file to book by metadata ASIN ({asin}): {matched_book.title}")
+                except Exception as e:
+                    logger.debug(f"Could not extract ASIN from metadata for {file_path.name}: {e}")
+
+                # Fallback: Extract potential ASIN from filename (ASINs are alphanumeric, typically 10 chars)
+                if not matched_book:
+                    filename_parts = file_path.stem.split('_')
+                    for part in filename_parts:
+                        if len(part) == 10 and part.isalnum():
+                            # This might be an ASIN
+                            potential_asin = part
+                            matched_book = self.db.query(Book).filter(
+                                Book.asin == potential_asin,
+                                Book.file_path.is_(None)
+                            ).first()
+                            if matched_book:
+                                logger.info(f"Matched file to book by filename ASIN ({potential_asin}): {matched_book.title}")
+                                break
 
                 # If no ASIN match, try to extract metadata and fuzzy match
                 if not matched_book and books_without_files:

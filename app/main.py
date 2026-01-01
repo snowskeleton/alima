@@ -266,6 +266,7 @@ app.add_middleware(
     cookie_name="alima_csrf",
     cookie_secure=settings.domain.startswith("https://"),
     cookie_samesite="lax",
+    header_name="x-csrf-token",  # Match the header name we're sending from JavaScript
     exempt_urls=[re.compile(r"^/health$")],  # Health check doesn't need CSRF (regex pattern required)
 )
 

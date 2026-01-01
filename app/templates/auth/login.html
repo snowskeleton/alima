@@ -1,3 +1,4 @@
+{% from "_csrf.html" import csrf_token %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -146,6 +147,7 @@
         {% include "_messages.html" %}
 
         <form action="/auth/login" method="POST">
+            {{ csrf_token(request) }}
             {% if next %}
             <input type="hidden" name="next" value="{{ next }}">
             {% endif %}

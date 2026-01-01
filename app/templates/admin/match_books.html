@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_csrf.html" import csrf_token %}
 
 {% block title %}Match Books - Alima{% endblock %}
 
@@ -430,7 +431,7 @@ async function confirmSelectedMatches() {
         }
 
         try {
-            const response = await fetch(`/admin/match-books/${encodeURIComponent(file.filename)}/confirm/${bookId}`, {
+            const response = await fetchWithCsrf(`/admin/match-books/${encodeURIComponent(file.filename)}/confirm/${bookId}`, {
                 method: 'POST',
                 body: new FormData(),
             });
@@ -480,7 +481,7 @@ async function importSelectedAsNew() {
         const row = checkbox.closest('tr');
 
         try {
-            const response = await fetch(`/admin/match-books/${encodeURIComponent(file.filename)}/import-new`, {
+            const response = await fetchWithCsrf(`/admin/match-books/${encodeURIComponent(file.filename)}/import-new`, {
                 method: 'POST',
             });
 
@@ -528,7 +529,7 @@ async function deleteSelectedFiles() {
         const row = checkbox.closest('tr');
 
         try {
-            const response = await fetch(`/admin/match-books/${encodeURIComponent(file.filename)}/delete`, {
+            const response = await fetchWithCsrf(`/admin/match-books/${encodeURIComponent(file.filename)}/delete`, {
                 method: 'POST',
             });
 

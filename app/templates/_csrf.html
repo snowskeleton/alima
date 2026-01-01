@@ -1,0 +1,6 @@
+{% macro csrf_token(request) %}
+{# starlette-csrf only validates tokens in headers, not form fields #}
+{# This hidden field is kept for compatibility but won't be validated #}
+{# Forms are handled by JavaScript auto-submit with headers #}
+<input type="hidden" name="_csrf_token" value="{{ request.cookies.get('alima_csrf', '') }}" data-csrf-token>
+{% endmacro %}

@@ -1,3 +1,4 @@
+{% from "_csrf.html" import csrf_token %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -196,6 +197,7 @@
         {% include "_messages.html" %}
 
         <form action="/auth/accept-invite" method="POST">
+            {{ csrf_token(request) }}
             <input type="hidden" name="token" value="{{ token }}">
 
             <div class="form-group">

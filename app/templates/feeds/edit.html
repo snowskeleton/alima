@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_csrf.html" import csrf_token %}
 
 {% block title %}Edit Feed - Alima{% endblock %}
 
@@ -8,6 +9,7 @@
 </div>
 
 <form action="/feeds/{{ feed.id }}/update" method="POST" enctype="multipart/form-data">
+    {{ csrf_token(request) }}
     <div class="form-group">
         <label class="form-label">Feed Name</label>
         <input type="text" name="name" class="form-input" value="{{ feed.name }}" required>
@@ -81,7 +83,7 @@ async function removeFeedCover(feedId) {
         return;
     }
 
-    await fetch(`/feeds/${feedId}/remove-cover`, {
+    await fetchWithCsrf(`/feeds/${feedId}/remove-cover`, {
         method: 'POST',
     });
 

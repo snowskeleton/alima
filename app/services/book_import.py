@@ -2,7 +2,6 @@
 
 import logging
 import shutil
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -68,16 +67,23 @@ class BookImportService:
         final_title = title or metadata.get("title") or source_file_path.stem
         final_author = author or metadata.get("author") or "Unknown"
 
-        # Generate unique filename
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        # Generate clean filename (sanitize title)
         safe_title = "".join(
             c for c in final_title if c.isalnum() or c in (" ", "-", "_")
         ).rstrip()
-        filename = f"{timestamp}_{safe_title}{file_format}"
+        filename = f"{safe_title}{file_format}"
 
         # Copy file to audiobooks directory
         dest_path = settings.audiobooks_path / filename
         settings.audiobooks_path.mkdir(parents=True, exist_ok=True)
+
+        # Handle duplicate filenames
+        counter = 1
+        while dest_path.exists():
+            filename = f"{safe_title}_{counter}{file_format}"
+            dest_path = settings.audiobooks_path / filename
+            counter += 1
+
         shutil.copy2(source_file_path, dest_path)
 
         logger.info(f"Copied file to {dest_path}")
@@ -88,8 +94,15 @@ class BookImportService:
         # Extract cover art if present
         cover_image_path = None
         if extract_metadata:
-            cover_filename = f"{timestamp}_{safe_title}.jpg"
+            cover_filename = f"{safe_title}.jpg"
             cover_dest_path = settings.covers_path / cover_filename
+
+            # Handle duplicate cover filenames
+            counter = 1
+            while cover_dest_path.exists():
+                cover_filename = f"{safe_title}_{counter}.jpg"
+                cover_dest_path = settings.covers_path / cover_filename
+                counter += 1
 
             if self.metadata_service.extract_cover_art(dest_path, cover_dest_path):
                 cover_image_path = f"covers/{cover_filename}"
@@ -146,17 +159,24 @@ class BookImportService:
         if file_format not in valid_formats:
             raise ValueError(f"Unsupported file format: {file_format}")
 
-        # Generate unique filename
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        # Generate clean filename (sanitize title)
         title = metadata.get("title", source_file_path.stem)
         safe_title = "".join(
             c for c in title if c.isalnum() or c in (" ", "-", "_")
         ).rstrip()
-        filename = f"{timestamp}_{safe_title}{file_format}"
+        filename = f"{safe_title}{file_format}"
 
-        # Copy file
+        # Copy file to audiobooks directory
         dest_path = settings.audiobooks_path / filename
         settings.audiobooks_path.mkdir(parents=True, exist_ok=True)
+
+        # Handle duplicate filenames
+        counter = 1
+        while dest_path.exists():
+            filename = f"{safe_title}_{counter}{file_format}"
+            dest_path = settings.audiobooks_path / filename
+            counter += 1
+
         shutil.copy2(source_file_path, dest_path)
 
         # Get file size

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_csrf.html" import csrf_token %}
 
 {% block title %}User Created - Alima{% endblock %}
 
@@ -231,7 +232,7 @@ async function sendPasswordReset(userId, userEmail) {
         return;
     }
 
-    const response = await fetch(`/admin/users/${userId}/send-reset`, {
+    const response = await fetchWithCsrf(`/admin/users/${userId}/send-reset`, {
         method: 'POST',
     });
 

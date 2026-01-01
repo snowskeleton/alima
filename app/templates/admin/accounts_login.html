@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_csrf.html" import csrf_token %}
 
 {% block title %}Add Audible Account - Login{% endblock %}
 
@@ -229,7 +230,7 @@ document.getElementById('marketplaceForm').addEventListener('submit', async (e) 
     formData.append('marketplace', document.getElementById('marketplace').value);
     formData.append('with_username', document.getElementById('with_username').checked);
 
-    const response = await fetch('/admin/accounts/login/generate-url', {
+    const response = await fetchWithCsrf('/admin/accounts/login/generate-url', {
         method: 'POST',
         body: formData
     });
@@ -263,7 +264,7 @@ document.getElementById('completeForm').addEventListener('submit', async (e) => 
     const formData = new FormData(e.target);
 
     try {
-        const response = await fetch('/admin/accounts/login/complete', {
+        const response = await fetchWithCsrf('/admin/accounts/login/complete', {
             method: 'POST',
             body: formData
         });

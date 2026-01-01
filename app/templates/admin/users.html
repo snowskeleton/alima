@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_csrf.html" import csrf_token %}
 
 {% block title %}Manage Users - Alima{% endblock %}
 
@@ -17,6 +18,7 @@
 
     <div id="createForm" class="create-form" style="display: none;">
         <form action="/admin/users/create" method="POST">
+            {{ csrf_token(request) }}
             <div class="form-row">
                 <div class="form-group">
                     <label class="form-label">Email Address</label>
@@ -165,6 +167,7 @@
         <h3>Change User Role</h3>
         <p>Change role for: <strong id="modalUserEmail"></strong></p>
         <form id="changeRoleForm" method="POST">
+            {{ csrf_token(request) }}
             <div class="form-group">
                 <label class="form-label">New Role</label>
                 <select name="role" id="modalRoleSelect" class="form-input">
@@ -455,7 +458,7 @@ document.getElementById('changeRoleForm').addEventListener('submit', async (e) =
 
     const formData = new FormData(e.target);
 
-    const response = await fetch(`/admin/users/${currentUserId}/change-role`, {
+    const response = await fetchWithCsrf(`/admin/users/${currentUserId}/change-role`, {
         method: 'POST',
         body: formData,
     });
@@ -472,7 +475,7 @@ async function deleteUser(userId, userEmail) {
         return;
     }
 
-    const response = await fetch(`/admin/users/${userId}`, {
+    const response = await fetchWithCsrf(`/admin/users/${userId}`, {
         method: 'DELETE',
     });
 
@@ -487,7 +490,7 @@ async function revokeInvite(inviteId, inviteEmail) {
         return;
     }
 
-    const response = await fetch(`/admin/invites/${inviteId}`, {
+    const response = await fetchWithCsrf(`/admin/invites/${inviteId}`, {
         method: 'DELETE',
     });
 
@@ -502,7 +505,7 @@ async function sendPasswordResetToUser(userId, userEmail) {
         return;
     }
 
-    const response = await fetch(`/admin/users/${userId}/send-reset`, {
+    const response = await fetchWithCsrf(`/admin/users/${userId}/send-reset`, {
         method: 'POST',
     });
 

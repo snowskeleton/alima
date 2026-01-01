@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+    <meta name="csrf-token" content="{{ request.cookies.get('alima_csrf', '') }}">
     <title>{% block title %}Alima - Audible Library Manager{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', path='/css/main.css') }}">
 
@@ -88,6 +89,73 @@
         {% include "_messages.html" %}
         {% block content %}{% endblock %}
     </main>
+
+    <!-- Global CSRF Token Helpers -->
+    <script>
+        // Get CSRF token from meta tag (reads from alima_csrf cookie)
+        function getCsrfToken() {
+            const token = document.querySelector('meta[name="csrf-token"]');
+            return token ? token.getAttribute('content') : '';
+        }
+
+        // Add CSRF token to fetch request headers
+        function addCsrfToFetch(options = {}) {
+            const token = getCsrfToken();
+            if (!options.headers) {
+                options.headers = {};
+            }
+            // starlette-csrf expects lowercase header name
+            options.headers['x-csrf-token'] = token;
+            return options;
+        }
+
+        // Helper for fetch with CSRF
+        function fetchWithCsrf(url, options = {}) {
+            return fetch(url, addCsrfToFetch(options));
+        }
+
+        // Auto-intercept ALL form submissions and convert to fetch with CSRF header
+        // This is required because starlette-csrf ONLY validates headers, not form fields
+        document.addEventListener('DOMContentLoaded', function() {
+            document.addEventListener('submit', function(e) {
+                const form = e.target;
+
+                // Only intercept POST forms (GET forms don't need CSRF)
+                if (form.method.toUpperCase() !== 'POST') {
+                    return;
+                }
+
+                // Prevent default form submission
+                e.preventDefault();
+
+                // Get form data
+                const formData = new FormData(form);
+                const action = form.action;
+
+                // Submit via fetch with CSRF header
+                fetchWithCsrf(action, {
+                    method: 'POST',
+                    body: formData,
+                })
+                .then(response => {
+                    if (response.redirected) {
+                        // Follow redirects
+                        window.location.href = response.url;
+                    } else if (response.ok) {
+                        // Reload page on success
+                        window.location.reload();
+                    } else {
+                        // Show error
+                        alert('Request failed: ' + response.statusText);
+                    }
+                })
+                .catch(error => {
+                    console.error('Form submission error:', error);
+                    alert('Request failed. Please try again.');
+                });
+            });
+        });
+    </script>
 
     {% block extra_js %}{% endblock %}
 </body>

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_csrf.html" import csrf_token %}
 
 {% block title %}Manage Invites - Alima{% endblock %}
 
@@ -14,6 +15,7 @@
     <div id="inviteForm" class="add-invite-form" style="display: none;">
         <h3>Send User Invite</h3>
         <form action="/admin/invites/send" method="POST">
+            {{ csrf_token(request) }}
             <div class="form-group">
                 <label class="form-label">Email Address</label>
                 <input type="email" name="email" class="form-input" required>
@@ -279,7 +281,7 @@ async function revokeInvite(inviteId) {
         return;
     }
 
-    const response = await fetch(`/admin/invites/${inviteId}`, {
+    const response = await fetchWithCsrf(`/admin/invites/${inviteId}`, {
         method: 'DELETE',
     });
 

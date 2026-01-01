@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_csrf.html" import csrf_token %}
 
 {% block title %}Create Feed - Alima{% endblock %}
 
@@ -8,6 +9,7 @@
 </div>
 
 <form action="/feeds/create" method="POST">
+    {{ csrf_token(request) }}
     <div class="form-group">
         <label class="form-label">Feed Name</label>
         <input type="text" name="name" class="form-input" required>

@@ -44,6 +44,7 @@ class MetadataService:
                 "publisher": None,
                 "duration_seconds": None,
                 "genres": None,
+                "asin": None,  # Audible-specific identifier
             }
 
             # Handle MP4/M4A/M4B files (most common for audiobooks)
@@ -92,6 +93,10 @@ class MetadataService:
                 # Duration
                 if hasattr(audio.info, "length"):
                     metadata["duration_seconds"] = int(audio.info.length)
+
+                # ASIN (Audible-specific)
+                if "CDEK" in audio:
+                    metadata["asin"] = audio["CDEK"][0]
 
             # Add support for other formats if needed
             else:

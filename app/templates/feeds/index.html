@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_csrf.html" import csrf_token %}
 
 {% block title %}My Feeds - Alima{% endblock %}
 
@@ -164,7 +165,7 @@ async function deleteFeed(feedId) {
         return;
     }
 
-    const response = await fetch(`/feeds/${feedId}`, {
+    const response = await fetchWithCsrf(`/feeds/${feedId}`, {
         method: 'DELETE',
     });
 
@@ -175,14 +176,14 @@ async function deleteFeed(feedId) {
 }
 
 async function pinFeed(feedId) {
-    await fetch(`/feeds/${feedId}/pin`, {
+    await fetchWithCsrf(`/feeds/${feedId}/pin`, {
         method: 'POST',
     });
     window.location.reload();
 }
 
 async function unpinFeed(feedId) {
-    await fetch(`/feeds/${feedId}/unpin`, {
+    await fetchWithCsrf(`/feeds/${feedId}/unpin`, {
         method: 'POST',
     });
     window.location.reload();

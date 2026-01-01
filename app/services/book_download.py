@@ -3,6 +3,7 @@
 import json
 import logging
 import datetime
+import shutil
 # from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -291,32 +292,52 @@ class BookDownloadService:
             queue_entry.status = DownloadStatus.DECRYPTING
             self.db.commit()
 
-            output_dir = settings.audiobooks_path
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            # Create filename: sanitize title
+            # Create filename: sanitized title
             safe_title = self._sanitize_filename(book.title)
-            output_file = output_dir / f"{safe_title}.m4a"
+            filename = f"{safe_title}.m4a"
 
-            # Handle duplicate filenames
+            # Decrypt to temp location first to avoid race condition with file integrity check
+            # Use the existing temp directory where we downloaded the aaxc file
+            temp_output_file = settings.temp_path / filename
+
+            # Handle duplicate filenames in temp
             counter = 1
-            while output_file.exists():
-                output_file = output_dir / f"{safe_title}_{counter}.m4a"
+            while temp_output_file.exists():
+                filename = f"{safe_title}_{counter}.m4a"
+                temp_output_file = settings.temp_path / filename
                 counter += 1
 
-            logger.info(f"Decrypting {queue_entry.asin} to {output_file}")
+            logger.info(f"Decrypting {queue_entry.asin} to temporary location: {temp_output_file}")
 
-            # Decrypt using snowcrypt
+            # Decrypt using snowcrypt to temp location
             snowcrypt.decrypt_aaxc(
                 str(aaxc_file),
-                str(output_file),
+                str(temp_output_file),
                 voucher_dict["key"],
                 voucher_dict["iv"]
             )
 
-            # Update book record
-            book.file_path = str(output_file.relative_to(settings.audiobooks_path.parent))
-            book.file_size = output_file.stat().st_size
+            # Determine final output location
+            output_dir = settings.audiobooks_path
+            output_dir.mkdir(parents=True, exist_ok=True)
+            final_filename = f"{safe_title}.m4a"
+            final_output_file = output_dir / final_filename
+
+            # Handle duplicate filenames in final location
+            counter = 1
+            while final_output_file.exists():
+                final_filename = f"{safe_title}_{counter}.m4a"
+                final_output_file = output_dir / final_filename
+                counter += 1
+
+            # Atomically move completed file from temp to final location
+            # This prevents the integrity check from finding incomplete files
+            logger.info(f"Moving decrypted file to final location: {final_output_file}")
+            shutil.move(str(temp_output_file), str(final_output_file))
+
+            # Update book record with final path
+            book.file_path = str(final_output_file.relative_to(settings.audiobooks_path.parent))
+            book.file_size = final_output_file.stat().st_size
             book.file_format = "m4a"
             book.downloaded_at = datetime.datetime.now(datetime.timezone.utc)
 
