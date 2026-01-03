@@ -95,7 +95,20 @@
             {% if book.file_size %}
             <div class="metadata-item">
                 <strong>File Size:</strong>
-                <span>{{ "%.2f"|format(book.file_size / 1024 / 1024 / 1024) }} GB</span>
+                <span>
+                    {% set gb = book.file_size / 1024 / 1024 / 1024 %}
+                    {% set mb = book.file_size / 1024 / 1024 %}
+                    {% set kb = book.file_size / 1024 %}
+                    {% if gb >= 1 %}
+                        {{ "%.1f"|format(gb) }} GB
+                    {% elif mb >= 1 %}
+                        {{ "%.1f"|format(mb) }} MB
+                    {% elif kb >= 1 %}
+                        {{ "%.1f"|format(kb) }} KB
+                    {% else %}
+                        {{ book.file_size }} B
+                    {% endif %}
+                </span>
             </div>
             {% endif %}
 

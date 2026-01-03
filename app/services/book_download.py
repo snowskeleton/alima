@@ -341,6 +341,10 @@ class BookDownloadService:
             book.file_format = "m4a"
             book.downloaded_at = datetime.datetime.now(datetime.timezone.utc)
 
+            # Commit immediately to prevent race condition with file integrity check
+            # The file is now in the audiobooks directory, so the database must be updated ASAP
+            self.db.commit()
+
             # Clean up temp files
             aaxc_file.unlink(missing_ok=True)
             voucher_file.unlink(missing_ok=True)
@@ -367,6 +371,7 @@ class BookDownloadService:
                     speed_kbps = (book.file_size / 1024) / duration
                     queue_entry.download_speed_kbps = int(speed_kbps)
 
+            # Commit queue entry metrics
             self.db.commit()
 
             logger.info(f"Successfully downloaded and decrypted {queue_entry.asin}")
