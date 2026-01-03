@@ -17,6 +17,9 @@ from sqlalchemy.orm import Session
 logs_dir = Path("/app/data/logs") if Path("/app").exists() else Path("data/logs")
 logs_dir.mkdir(parents=True, exist_ok=True)
 
+# Import email notification handler
+from app.services.email_logging_handler import EmailNotificationHandler
+
 # Configure logging with both file and console handlers
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +39,8 @@ logging.basicConfig(
             maxBytes=10 * 1024 * 1024,  # 10MB
             backupCount=5,
         ),
+        # Email notification handler (WARNING and above)
+        EmailNotificationHandler(level=logging.WARNING),
     ],
 )
 

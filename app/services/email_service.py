@@ -416,3 +416,350 @@ Email Configuration:
         except Exception as e:
             logger.error(f"Failed to send test email to {recipient_email}: {e}")
             return False
+
+    @staticmethod
+    async def send_error_notification(
+        error_level: str, error_message: str, error_details: Optional[str] = None
+    ) -> bool:
+        """
+        Send an error/warning notification email to admins with notifications enabled.
+
+        Args:
+            error_level: Log level (ERROR, WARNING, CRITICAL)
+            error_message: The error message
+            error_details: Optional additional details (stack trace, etc.)
+
+        Returns:
+            True if email sent successfully to at least one recipient, False otherwise
+        """
+        from ..models import User, UserRole
+        from .settings_service import SettingsService
+        from ..database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            # Get all admins with notifications enabled
+            admins = db.query(User).filter(
+                User.role == UserRole.ADMIN,
+                User.receive_notifications == True
+            ).all()
+
+            if not admins:
+                logger.debug("No admins have notifications enabled")
+                return False
+
+            # Get SMTP settings
+            settings_service = SettingsService(db)
+            domain = SettingsService.get_domain(db)
+            smtp_host = settings_service.get("smtp_host")
+            smtp_from = settings_service.get("smtp_from_email")
+            smtp_port = int(settings_service.get("smtp_port") or 587)
+            smtp_username = settings_service.get("smtp_username")
+            smtp_password = settings_service.get("smtp_password")
+            smtp_from_name = settings_service.get("smtp_from_name") or settings.app_name
+            app_name = settings_service.get("app_name") or settings.app_name
+
+            # Skip if SMTP not configured
+            if not smtp_host or not smtp_from:
+                logger.warning("SMTP not configured. Cannot send error notification.")
+                return False
+
+            # Determine color and emoji based on error level
+            level_styles = {
+                "CRITICAL": {"color": "#dc3545", "bg": "#f8d7da", "emoji": "🚨"},
+                "ERROR": {"color": "#dc3545", "bg": "#f8d7da", "emoji": "❌"},
+                "WARNING": {"color": "#ffc107", "bg": "#fff3cd", "emoji": "⚠️"},
+            }
+            style = level_styles.get(error_level, level_styles["ERROR"])
+
+            # Create email message
+            subject = f"{style['emoji']} {app_name} - {error_level}: {error_message[:50]}"
+
+            html_body = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {{
+                        font-family: Arial, sans-serif;
+                        line-height: 1.6;
+                        color: #333;
+                    }}
+                    .container {{
+                        max-width: 600px;
+                        margin: 0 auto;
+                        padding: 20px;
+                    }}
+                    .alert {{
+                        background-color: {style['bg']};
+                        border-left: 4px solid {style['color']};
+                        padding: 15px;
+                        margin: 20px 0;
+                    }}
+                    .alert h3 {{
+                        margin-top: 0;
+                        color: {style['color']};
+                    }}
+                    .details {{
+                        background-color: #f8f9fa;
+                        border: 1px solid #ddd;
+                        padding: 15px;
+                        border-radius: 4px;
+                        font-family: monospace;
+                        font-size: 12px;
+                        white-space: pre-wrap;
+                        word-wrap: break-word;
+                    }}
+                    .footer {{
+                        margin-top: 30px;
+                        padding-top: 20px;
+                        border-top: 1px solid #ddd;
+                        font-size: 12px;
+                        color: #666;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="alert">
+                        <h3>{style['emoji']} {error_level}</h3>
+                        <p><strong>{error_message}</strong></p>
+                    </div>
+                    {f'<div class="details"><strong>Details:</strong><br>{error_details}</div>' if error_details else ''}
+                    <div class="footer">
+                        <p>This is an automated notification from {app_name}.</p>
+                        <p>To manage your notification preferences, visit <a href="{domain}/admin/users">{domain}/admin/users</a></p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+
+            text_body = f"""
+{style['emoji']} {error_level}
+{'-' * 50}
+
+{error_message}
+
+{f'Details:\n{error_details}' if error_details else ''}
+
+---
+This is an automated notification from {app_name}.
+To manage your notification preferences, visit {domain}/admin/users
+            """
+
+            # Send to all admins with notifications enabled
+            success_count = 0
+            for admin in admins:
+                try:
+                    # Create message
+                    message = MIMEMultipart("alternative")
+                    message["From"] = f"{smtp_from_name} <{smtp_from}>" if smtp_from_name else smtp_from
+                    message["To"] = admin.email
+                    message["Subject"] = subject
+
+                    # Attach both plain text and HTML versions
+                    message.attach(MIMEText(text_body, "plain"))
+                    message.attach(MIMEText(html_body, "html"))
+
+                    # Send email
+                    await aiosmtplib.send(
+                        message,
+                        hostname=smtp_host,
+                        port=smtp_port,
+                        username=smtp_username,
+                        password=smtp_password,
+                        start_tls=True,
+                    )
+
+                    logger.info(f"Error notification sent to {admin.email}")
+                    success_count += 1
+
+                except Exception as e:
+                    logger.error(f"Failed to send error notification to {admin.email}: {e}")
+
+            return success_count > 0
+
+        except Exception as e:
+            logger.error(f"Failed to send error notifications: {e}")
+            return False
+        finally:
+            db.close()
+
+    @staticmethod
+    async def send_matching_notification(filename: str, file_path: str) -> bool:
+        """
+        Send a notification that a file has been moved to the matching queue.
+
+        Args:
+            filename: Name of the file that needs matching
+            file_path: Full path to the file
+
+        Returns:
+            True if email sent successfully to at least one recipient, False otherwise
+        """
+        from ..models import User, UserRole
+        from .settings_service import SettingsService
+        from ..database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            # Get all admins with notifications enabled
+            admins = db.query(User).filter(
+                User.role == UserRole.ADMIN,
+                User.receive_notifications == True
+            ).all()
+
+            if not admins:
+                logger.debug("No admins have notifications enabled")
+                return False
+
+            # Get SMTP settings
+            settings_service = SettingsService(db)
+            domain = SettingsService.get_domain(db)
+            smtp_host = settings_service.get("smtp_host")
+            smtp_from = settings_service.get("smtp_from_email")
+            smtp_port = int(settings_service.get("smtp_port") or 587)
+            smtp_username = settings_service.get("smtp_username")
+            smtp_password = settings_service.get("smtp_password")
+            smtp_from_name = settings_service.get("smtp_from_name") or settings.app_name
+            app_name = settings_service.get("app_name") or settings.app_name
+
+            # Skip if SMTP not configured
+            if not smtp_host or not smtp_from:
+                logger.warning("SMTP not configured. Cannot send matching notification.")
+                return False
+
+            # Create match URL
+            match_url = f"{domain}/admin/match-books"
+
+            # Create email message
+            subject = f"📚 {app_name} - New Book Needs Matching"
+
+            html_body = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {{
+                        font-family: Arial, sans-serif;
+                        line-height: 1.6;
+                        color: #333;
+                    }}
+                    .container {{
+                        max-width: 600px;
+                        margin: 0 auto;
+                        padding: 20px;
+                    }}
+                    .alert {{
+                        background-color: #d1ecf1;
+                        border-left: 4px solid #17a2b8;
+                        padding: 15px;
+                        margin: 20px 0;
+                    }}
+                    .alert h3 {{
+                        margin-top: 0;
+                        color: #17a2b8;
+                    }}
+                    .button {{
+                        display: inline-block;
+                        padding: 12px 24px;
+                        background-color: #007bff;
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 4px;
+                        margin: 20px 0;
+                    }}
+                    .file-info {{
+                        background-color: #f8f9fa;
+                        border: 1px solid #ddd;
+                        padding: 15px;
+                        border-radius: 4px;
+                        font-family: monospace;
+                        font-size: 14px;
+                    }}
+                    .footer {{
+                        margin-top: 30px;
+                        padding-top: 20px;
+                        border-top: 1px solid #ddd;
+                        font-size: 12px;
+                        color: #666;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="alert">
+                        <h3>📚 New Book Needs Matching</h3>
+                        <p>A new audiobook file has been added to the matching queue and needs your attention.</p>
+                    </div>
+                    <div class="file-info">
+                        <p><strong>Filename:</strong> {filename}</p>
+                        <p><strong>Location:</strong> {file_path}</p>
+                    </div>
+                    <a href="{match_url}" class="button">Go to Matching Page</a>
+                    <p>Or copy and paste this link into your browser:</p>
+                    <p><a href="{match_url}">{match_url}</a></p>
+                    <div class="footer">
+                        <p>This is an automated notification from {app_name}.</p>
+                        <p>To manage your notification preferences, visit <a href="{domain}/admin/users">{domain}/admin/users</a></p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+
+            text_body = f"""
+📚 New Book Needs Matching
+{'-' * 50}
+
+A new audiobook file has been added to the matching queue and needs your attention.
+
+Filename: {filename}
+Location: {file_path}
+
+Go to the matching page to address this:
+{match_url}
+
+---
+This is an automated notification from {app_name}.
+To manage your notification preferences, visit {domain}/admin/users
+            """
+
+            # Send to all admins with notifications enabled
+            success_count = 0
+            for admin in admins:
+                try:
+                    # Create message
+                    message = MIMEMultipart("alternative")
+                    message["From"] = f"{smtp_from_name} <{smtp_from}>" if smtp_from_name else smtp_from
+                    message["To"] = admin.email
+                    message["Subject"] = subject
+
+                    # Attach both plain text and HTML versions
+                    message.attach(MIMEText(text_body, "plain"))
+                    message.attach(MIMEText(html_body, "html"))
+
+                    # Send email
+                    await aiosmtplib.send(
+                        message,
+                        hostname=smtp_host,
+                        port=smtp_port,
+                        username=smtp_username,
+                        password=smtp_password,
+                        start_tls=True,
+                    )
+
+                    logger.info(f"Matching notification sent to {admin.email}")
+                    success_count += 1
+
+                except Exception as e:
+                    logger.error(f"Failed to send matching notification to {admin.email}: {e}")
+
+            return success_count > 0
+
+        except Exception as e:
+            logger.error(f"Failed to send matching notifications: {e}")
+            return False
+        finally:
+            db.close()

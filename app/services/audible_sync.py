@@ -767,6 +767,35 @@ class AudibleSyncService:
                         shutil.move(str(file_path), str(dest_path))
                         stats["moved_to_unassigned"] += 1
                         logger.info(f"Moved unmatched file '{file_path.name}' to unassigned directory")
+
+                        # Send email notification about the file needing matching
+                        try:
+                            import asyncio
+                            from .email_service import EmailService
+
+                            # Run the async email notification
+                            try:
+                                loop = asyncio.get_event_loop()
+                                if loop.is_running():
+                                    asyncio.create_task(EmailService.send_matching_notification(
+                                        filename=dest_path.name,
+                                        file_path=str(dest_path)
+                                    ))
+                                else:
+                                    asyncio.run(EmailService.send_matching_notification(
+                                        filename=dest_path.name,
+                                        file_path=str(dest_path)
+                                    ))
+                            except RuntimeError:
+                                # No event loop, create one
+                                asyncio.run(EmailService.send_matching_notification(
+                                    filename=dest_path.name,
+                                    file_path=str(dest_path)
+                                ))
+                        except Exception as email_error:
+                            # Don't fail the sync if email fails
+                            logger.warning(f"Failed to send matching notification email: {email_error}")
+
                     except Exception as e:
                         logger.error(f"Failed to move unmatched file '{file_path.name}': {e}")
 

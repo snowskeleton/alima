@@ -358,6 +358,38 @@ async def delete_user(
     return {"success": True, "message": f"User '{user_email}' deleted successfully"}
 
 
+@router.post("/users/{user_id}/toggle-notifications")
+async def toggle_user_notifications(
+    user_id: int,
+    request: Request,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Toggle email notifications for a user."""
+    import json
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return {"error": "User not found", "success": False}
+
+    # Only admins can receive notifications
+    if user.role != UserRole.ADMIN:
+        return {"error": "Only admin users can receive notifications", "success": False}
+
+    # Parse the JSON body
+    body = await request.json()
+    enabled = body.get("enabled", False)
+
+    user.receive_notifications = enabled
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "success": True,
+        "message": f"Notifications {'enabled' if enabled else 'disabled'} for {user.email}"
+    }
+
+
 @router.post("/sync/force-refresh-metadata")
 async def force_refresh_metadata(
     current_user: User = Depends(require_admin),

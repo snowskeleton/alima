@@ -113,6 +113,7 @@
             <tr>
                 <th>Email</th>
                 <th>Role</th>
+                <th>Notifications</th>
                 <th>Created</th>
                 <th>Last Login</th>
                 <th>Actions</th>
@@ -126,6 +127,19 @@
                     <span class="badge {% if user.role.value == 'admin' %}badge-primary{% else %}badge-secondary{% endif %}">
                         {{ user.role.value }}
                     </span>
+                </td>
+                <td>
+                    {% if user.role.value == 'admin' %}
+                    <label class="toggle-switch">
+                        <input type="checkbox"
+                               {% if user.receive_notifications %}checked{% endif %}
+                               onchange="toggleNotifications({{ user.id }}, this.checked)"
+                               {% if user.id == current_user.id %}data-is-current-user="true"{% endif %}>
+                        <span class="toggle-slider"></span>
+                    </label>
+                    {% else %}
+                    <span class="text-muted" style="font-size: 0.875rem;">N/A</span>
+                    {% endif %}
                 </td>
                 <td>{{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                 <td>
@@ -427,6 +441,57 @@
     gap: 0.5rem;
     margin-top: 1.5rem;
 }
+
+/* Toggle Switch Styles */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 48px;
+    height: 24px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: 0.3s;
+    border-radius: 24px;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.3s;
+    border-radius: 50%;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background-color: var(--primary-color);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(24px);
+}
+
+.toggle-switch input:disabled + .toggle-slider {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
 </style>
 
 <script>
@@ -512,6 +577,30 @@ async function sendPasswordResetToUser(userId, userEmail) {
     const data = await response.json();
     if (data.success) {
         window.location.reload();
+    }
+}
+
+async function toggleNotifications(userId, enabled) {
+    try {
+        const response = await fetchWithCsrf(`/admin/users/${userId}/toggle-notifications`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ enabled: enabled })
+        });
+
+        const data = await response.json();
+        if (!data.success) {
+            alert('Failed to update notification preference');
+            // Revert the checkbox
+            event.target.checked = !enabled;
+        }
+    } catch (error) {
+        console.error('Error toggling notifications:', error);
+        alert('Failed to update notification preference');
+        // Revert the checkbox
+        event.target.checked = !enabled;
     }
 }
 </script>
