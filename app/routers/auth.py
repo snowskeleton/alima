@@ -1,6 +1,6 @@
 """Authentication routes - login, logout, accept invite."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -19,7 +19,10 @@ from ..auth import (
 from ..config import settings
 from ..database import get_db
 from ..dependencies import get_current_user, get_optional_user
-from ..models import Invite, User
+from ..models import Invite, PasswordReset, User
+from ..services.email_service import EmailService
+from ..services.settings_service import SettingsService
+from ..utils.tokens import generate_reset_token
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 templates = Jinja2Templates(directory="app/templates")
@@ -211,6 +214,76 @@ async def logout(response: Response):
     )
     redirect_response.delete_cookie(key="session_token")
     return redirect_response
+
+
+@router.get("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_page(
+    request: Request,
+):
+    """Display forgot password form."""
+    from ..utils.flash import get_flashed_messages
+
+    return templates.TemplateResponse(
+        "auth/forgot_password.html",
+        {
+            "request": request,
+            "messages": get_flashed_messages(request),
+        },
+    )
+
+
+@router.post("/forgot-password")
+@limiter.limit("5/hour")  # Limit forgot password requests to prevent abuse
+async def forgot_password_submit(
+    request: Request,
+    email: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Process forgot password request."""
+    from ..utils.flash import flash
+
+    # Always show success message to prevent email enumeration attacks
+    success_message = "If an account with that email exists, we've sent a password reset link."
+
+    # Check if user exists
+    user = db.query(User).filter(User.email == email).first()
+
+    if user:
+        # Generate reset token
+        reset_token = generate_reset_token()
+
+        # Store token in database (expires in 24 hours)
+        password_reset = PasswordReset(
+            user_id=user.id,
+            token=reset_token,
+            expires_at=datetime.utcnow() + timedelta(hours=24),
+        )
+        db.add(password_reset)
+        db.commit()
+
+        # Send password reset email
+        email_service = EmailService()
+        email_sent = await email_service.send_password_reset_email(
+            recipient_email=user.email,
+            reset_token=reset_token,
+        )
+
+        # If email not sent (SMTP not configured), log the reset URL
+        if not email_sent:
+            domain = SettingsService.get_domain(db)
+            reset_url = f"{domain}/auth/reset-password?token={reset_token}"
+            print(f"\n{'='*60}")
+            print(f"PASSWORD RESET (SMTP not configured)")
+            print(f"Email: {user.email}")
+            print(f"Reset URL: {reset_url}")
+            print(f"{'='*60}\n")
+
+    # Always show the same message (prevents email enumeration)
+    flash(request, success_message, "success")
+    return RedirectResponse(
+        url="/auth/forgot-password",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @router.get("/accept-invite", response_class=HTMLResponse)

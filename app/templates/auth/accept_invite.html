@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ request.cookies.get('alima_csrf', '') }}">
     <title>Accept Invite - Alima</title>
     <style>
         :root {
@@ -229,5 +230,55 @@
             <button type="submit" class="btn btn-primary">Create Account</button>
         </form>
     </div>
+
+    <script>
+        // Get CSRF token from meta tag
+        function getCsrfToken() {
+            const token = document.querySelector('meta[name="csrf-token"]');
+            return token ? token.getAttribute('content') : '';
+        }
+
+        // Add CSRF token to fetch request headers
+        function addCsrfToFetch(options = {}) {
+            const token = getCsrfToken();
+            if (!options.headers) {
+                options.headers = {};
+            }
+            options.headers['x-csrf-token'] = token;
+            return options;
+        }
+
+        // Auto-intercept form submission and convert to fetch with CSRF header
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.querySelector('form');
+            if (form && form.method.toUpperCase() === 'POST') {
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    const formData = new FormData(form);
+                    const action = form.action;
+
+                    fetch(action, addCsrfToFetch({
+                        method: 'POST',
+                        body: formData,
+                    }))
+                    .then(response => {
+                        if (response.redirected) {
+                            window.location.href = response.url;
+                        } else if (response.ok) {
+                            window.location.reload();
+                        } else {
+                            return response.text().then(text => {
+                                alert('Request failed: ' + response.statusText);
+                            });
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Request error:', error);
+                        alert('Request failed. Please try again.');
+                    });
+                });
+            }
+        });
+    </script>
 </body>
 </html>

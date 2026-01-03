@@ -108,6 +108,139 @@ These scripts are useful for:
 
 But for normal development, **always use the migrations_runner.py pattern**.
 
+## CSRF Protection for Forms
+
+### Pattern: All POST forms MUST have CSRF protection
+
+**CRITICAL:** The application uses `starlette-csrf` which ONLY validates CSRF tokens in request headers (NOT form fields).
+
+### For pages that extend base.html
+
+If your template extends `base.html`, CSRF protection is automatic:
+1. Add `{% from "_csrf.html" import csrf_token %}` at the top
+2. Add `{{ csrf_token(request) }}` inside each `<form>` tag
+3. The JavaScript in `base.html` automatically intercepts form submissions and adds the CSRF header
+
+### For standalone pages (login, register, accept_invite, etc.)
+
+Standalone pages don't extend `base.html`, so they need manual CSRF setup:
+
+1. **Add CSRF meta tag in `<head>`:**
+```html
+<meta name="csrf-token" content="{{ request.cookies.get('alima_csrf', '') }}">
+```
+
+2. **Add CSRF token macro to form:**
+```html
+{% from "_csrf.html" import csrf_token %}
+<form method="POST" action="/your-endpoint">
+    {{ csrf_token(request) }}
+    <!-- form fields -->
+</form>
+```
+
+3. **Add CSRF JavaScript before `</body>`:**
+```html
+<script>
+    // Get CSRF token from meta tag
+    function getCsrfToken() {
+        const token = document.querySelector('meta[name="csrf-token"]');
+        return token ? token.getAttribute('content') : '';
+    }
+
+    // Add CSRF token to fetch request headers
+    function addCsrfToFetch(options = {}) {
+        const token = getCsrfToken();
+        if (!options.headers) {
+            options.headers = {};
+        }
+        options.headers['x-csrf-token'] = token;
+        return options;
+    }
+
+    // Auto-intercept form submission and convert to fetch with CSRF header
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.querySelector('form');
+        if (form && form.method.toUpperCase() === 'POST') {
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(form);
+                const action = form.action;
+
+                fetch(action, addCsrfToFetch({
+                    method: 'POST',
+                    body: formData,
+                }))
+                .then(response => {
+                    if (response.redirected) {
+                        window.location.href = response.url;
+                    } else if (response.ok) {
+                        window.location.reload();
+                    } else {
+                        return response.text().then(text => {
+                            alert('Request failed: ' + response.statusText);
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Request error:', error);
+                    alert('Request failed. Please try again.');
+                });
+            });
+        }
+    });
+</script>
+```
+
+### Checklist: Verifying CSRF Protection
+
+When adding or modifying forms, verify:
+
+1. **Find all templates with forms:**
+   ```bash
+   find app/templates -name "*.html" -exec grep -l '<form' {} \;
+   ```
+
+2. **For each template with a POST form:**
+   - If it extends `base.html`: ✅ Has `{{ csrf_token(request) }}` in form
+   - If it's standalone: ✅ Has CSRF meta tag AND JavaScript
+
+3. **Test the form:**
+   - Submit should work without 403 CSRF errors
+   - Check browser console for errors
+
+### Why This Mistake Happened
+
+**Root cause:** Standalone authentication pages (login, register, accept_invite) don't extend `base.html`, so they were missing the automatic CSRF JavaScript interception despite having the CSRF token macro in their forms.
+
+**Lesson:** Always check for standalone pages when implementing security features that rely on `base.html`.
+
+## Password Hashing
+
+### Current Implementation: Argon2id Only
+
+The application uses **Argon2id** exclusively for password hashing (via `argon2-cffi`), which is:
+- The OWASP-recommended algorithm
+- Winner of the Password Hashing Competition
+- More secure than bcrypt
+- No password length limits (bcrypt has a 72-byte limit)
+- Actively maintained
+
+### Migration from passlib/bcrypt
+
+Users with old bcrypt password hashes can reset their passwords via the "Forgot your password?" link on the login page. No backward compatibility is maintained to keep the codebase simple and secure.
+
+### Code Location
+
+All password hashing logic is in `/app/auth.py`:
+- `get_password_hash(password)` - Hash a password using Argon2id
+- `verify_password(plain, hashed)` - Verify an Argon2 password hash
+- `authenticate_user()` - Authenticates users and auto-rehashes if Argon2 parameters change
+
+### Why We Replaced passlib
+
+The old `passlib` library is unmaintained and has compatibility issues with modern bcrypt versions (the `AttributeError: module 'bcrypt' has no attribute '__about__'` error). We replaced it with `argon2-cffi` for a cleaner, more secure implementation.
+
 ## Other Development Patterns
 
 (Add more patterns here as they are discovered)

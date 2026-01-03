@@ -3,16 +3,17 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .models import User
 from .schemas import TokenData
 
-# Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing with Argon2id (OWASP-recommended, no password length limit)
+ph = PasswordHasher()
 
 # JWT settings
 ALGORITHM = "HS256"
@@ -20,58 +21,36 @@ ALGORITHM = "HS256"
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
-    Verify a password against a hash.
+    Verify a password against an Argon2 hash.
 
     Args:
         plain_password: Plain text password
-        hashed_password: Hashed password from database
+        hashed_password: Argon2 hashed password from database
 
     Returns:
         True if password matches, False otherwise
     """
-    # Bcrypt has a 72-byte limit, truncate properly at character boundaries
-    truncated_password = _truncate_password(plain_password)
-    return pwd_context.verify(truncated_password, hashed_password)
-
-
-def _truncate_password(password: str) -> str:
-    """
-    Truncate password to 72 bytes (bcrypt limit) at character boundaries.
-
-    Args:
-        password: Plain text password
-
-    Returns:
-        Truncated password that fits within 72 bytes
-    """
-    password_bytes = password.encode('utf-8')
-    if len(password_bytes) <= 72:
-        return password
-
-    # Truncate at character boundaries by decoding progressively smaller slices
-    for i in range(72, 0, -1):
-        try:
-            return password_bytes[:i].decode('utf-8')
-        except UnicodeDecodeError:
-            continue
-
-    # Fallback - should never reach here
-    return password[:72]
+    try:
+        ph.verify(hashed_password, plain_password)
+        return True
+    except (VerifyMismatchError, InvalidHashError):
+        return False
 
 
 def get_password_hash(password: str) -> str:
     """
-    Hash a password using bcrypt.
+    Hash a password using Argon2id.
+
+    Argon2id is the modern, OWASP-recommended password hashing algorithm.
+    Unlike bcrypt, it has no password length limit.
 
     Args:
         password: Plain text password
 
     Returns:
-        Hashed password
+        Hashed password (Argon2id format)
     """
-    # Bcrypt has a 72-byte limit, truncate properly at character boundaries
-    truncated_password = _truncate_password(password)
-    return pwd_context.hash(truncated_password)
+    return ph.hash(password)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -138,6 +117,8 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
     """
     Authenticate a user by email and password.
 
+    Rehashes password if Argon2 parameters have changed (security best practice).
+
     Args:
         db: Database session
         email: User email
@@ -153,6 +134,15 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
 
     if not verify_password(password, user.password_hash):
         return None
+
+    # Rehash if Argon2 parameters have changed (security best practice)
+    try:
+        if ph.check_needs_rehash(user.password_hash):
+            user.password_hash = get_password_hash(password)
+            db.commit()
+            db.refresh(user)
+    except Exception:
+        pass  # If check fails, just continue
 
     return user
 
