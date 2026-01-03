@@ -195,15 +195,29 @@ class FeedGeneratorService:
             # Fallback for titles without the space
             title = title[:-13].strip()
 
-        # Add series info to title if available (only if not already present)
-        if book.series:
-            series_text = book.series
-            if book.series_position:
-                series_text += f", Book {book.series_position}"
+        # Clean series name
+        series_name = book.series
+        if series_name:
+            # Also remove (Unabridged) from series
+            if series_name.endswith(" (Unabridged)"):
+                series_name = series_name[:-14].strip()
+            elif series_name.endswith("(Unabridged)"):
+                series_name = series_name[:-13].strip()
 
-            # Only add series info if it's not already in the title
-            if series_text not in title:
-                title = f"{title}: {series_text}"
+            # Check if series is actually different from title (ignore case and minor differences)
+            # Some files incorrectly have series set to title
+            title_normalized = title.lower().strip().rstrip('!.?')
+            series_normalized = series_name.lower().strip().rstrip('!.?')
+
+            # Only add series info if it's meaningfully different from the title
+            if series_normalized and series_normalized != title_normalized:
+                series_text = series_name
+                if book.series_position:
+                    series_text += f", Book {book.series_position}"
+
+                # Only add if not already in the title
+                if series_text not in title:
+                    title = f"{title}: {series_text}"
 
         SubElement(item, "title").text = title
         SubElement(item, "link").text = f"{domain}/library/{book.id}"
