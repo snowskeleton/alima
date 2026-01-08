@@ -25,7 +25,7 @@ def get_cached_setting(key: str, default: Any = None, value_type: type = str) ->
         The setting value converted to value_type, or default if not found
 
     Example:
-        >>> quick_sync_interval = get_cached_setting("quick_sync_interval_seconds", 60, int)
+        >>> quick_sync_interval = get_cached_setting("quick_sync_interval_minutes", 1, int)
         >>> smtp_host = get_cached_setting("smtp_host", "localhost", str)
     """
     try:

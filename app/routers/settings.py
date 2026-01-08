@@ -34,11 +34,18 @@ SETTING_DEFINITIONS = {
             "description": "Full URL where this application is hosted (use https:// for SSL)",
         },
         {
-            "key": "sync_interval_hours",
-            "label": "Sync Interval (hours)",
+            "key": "quick_sync_interval_minutes",
+            "label": "Quick Sync Interval (minutes)",
             "type": "number",
-            "placeholder": "6",
-            "description": "How often to sync with Audible and download new books (in hours)",
+            "placeholder": "1",
+            "description": "How often to check for new books from Audible (in minutes)",
+        },
+        {
+            "key": "full_sync_interval_minutes",
+            "label": "Full Sync Interval (minutes)",
+            "type": "number",
+            "placeholder": "1440",
+            "description": "How often to perform a complete library refresh from Audible (1440 = 24 hours)",
         },
         {
             "key": "download_quality",

@@ -114,7 +114,8 @@ class SettingsService:
         # These are the defaults if not set in Server Settings UI
         defaults = {
             "app_name": "Alima",
-            "sync_interval_hours": 6,
+            "quick_sync_interval_minutes": 1,
+            "full_sync_interval_minutes": 1440,  # 24 hours
             "download_quality": "High",
             "max_concurrent_downloads": 3,
             "session_expire_hours": 168,  # 7 days

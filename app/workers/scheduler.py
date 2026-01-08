@@ -110,28 +110,28 @@ def start_scheduler():
     # Get sync intervals from database settings (with hardcoded defaults)
     from ..utils.settings_cache import get_cached_setting
 
-    quick_sync_interval_seconds = get_cached_setting("quick_sync_interval_seconds", 60, int)
-    full_sync_interval_hours = get_cached_setting("full_sync_interval_hours", 24, int)
+    quick_sync_interval_minutes = get_cached_setting("quick_sync_interval_minutes", 1, int)
+    full_sync_interval_minutes = get_cached_setting("full_sync_interval_minutes", 1440, int)
 
     # Add quick sync job (runs frequently to check for new books)
     scheduler.add_job(
         quick_sync_all_libraries,
-        trigger=IntervalTrigger(seconds=quick_sync_interval_seconds),
+        trigger=IntervalTrigger(minutes=quick_sync_interval_minutes),
         id="quick_sync_libraries",
         name="Quick sync Audible libraries (new books only)",
         replace_existing=True,
     )
-    logger.debug(f"Scheduled quick sync to run every {quick_sync_interval_seconds} seconds")
+    logger.info(f"Scheduled quick sync to run every {quick_sync_interval_minutes} minutes")
 
     # Add full library sync job (runs less frequently for complete refresh)
     scheduler.add_job(
         sync_all_libraries,
-        trigger=IntervalTrigger(hours=full_sync_interval_hours),
+        trigger=IntervalTrigger(minutes=full_sync_interval_minutes),
         id="full_sync_libraries",
         name="Full sync all Audible libraries",
         replace_existing=True,
     )
-    logger.debug(f"Scheduled full sync to run every {full_sync_interval_hours} hours")
+    logger.info(f"Scheduled full sync to run every {full_sync_interval_minutes} minutes ({full_sync_interval_minutes / 60:.1f} hours)")
 
     # Add download queue processing job (runs every 30 seconds for active processing)
     scheduler.add_job(

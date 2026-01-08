@@ -194,6 +194,7 @@ class BookDownloadService:
             download_quality = get_cached_setting("download_quality", "High", str)
 
             # Request license
+            logger.info(f"Requesting license for {queue_entry.asin} with quality: {download_quality}")
             logger.debug(f"Requesting license for {queue_entry.asin}")
             license_response = client.post(
                 f"content/{queue_entry.asin}/licenserequest",
@@ -278,10 +279,12 @@ class BookDownloadService:
             aaxc_file = temp_dir / f"{queue_entry.asin}.aaxc"
             voucher_file = temp_dir / f"{queue_entry.asin}.voucher"
 
+            logger.info(f"Downloading encrypted audiobook file for '{book.title}' ({queue_entry.asin})")
             logger.debug(f"Downloading .aaxc file for {queue_entry.asin}")
             # Use the client's raw_request method with apply_cookies=True
             # CloudFront URLs require website cookies, not just auth headers
             self._download_file(download_url, aaxc_file, client)
+            logger.info(f"Successfully downloaded encrypted file for '{book.title}' ({aaxc_file.stat().st_size} bytes)")
 
             # Get and save voucher
             voucher_dict = decrypt_voucher_from_licenserequest(auth, license_response)
@@ -289,6 +292,7 @@ class BookDownloadService:
                 json.dump(voucher_dict, f, indent=2)
 
             # Decrypt to .m4a
+            logger.info(f"Starting decryption for '{book.title}' ({queue_entry.asin})")
             queue_entry.status = DownloadStatus.DECRYPTING
             self.db.commit()
 
@@ -316,6 +320,7 @@ class BookDownloadService:
                 voucher_dict["key"],
                 voucher_dict["iv"]
             )
+            logger.info(f"Successfully decrypted '{book.title}' ({temp_output_file.stat().st_size} bytes)")
 
             # Determine final output location
             output_dir = settings.audiobooks_path
@@ -374,7 +379,13 @@ class BookDownloadService:
             # Commit queue entry metrics
             self.db.commit()
 
-            logger.info(f"Successfully downloaded and decrypted {queue_entry.asin}")
+            # Log completion with metrics
+            speed_mb_s = (queue_entry.download_speed_kbps / 1024) if queue_entry.download_speed_kbps else 0
+            size_mb = (book.file_size / 1024 / 1024) if book.file_size else 0
+            logger.info(
+                f"Successfully completed download for '{book.title}' ({queue_entry.asin}): "
+                f"{size_mb:.1f} MB in {queue_entry.duration_seconds}s at {speed_mb_s:.1f} MB/s"
+            )
 
         except Exception as e:
             logger.error(f"Error downloading {queue_entry.asin}: {e}", exc_info=True)
