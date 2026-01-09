@@ -233,10 +233,13 @@ def _get_recent_log_lines(limit: int = 1000) -> list[str]:
         List of log lines (newest first)
     """
     # Try to find log file in common locations
+    # Construct data path from temp_path (which is /app/data/temp)
+    data_path = settings.temp_path.parent
+
     possible_log_paths = [
-        Path("/app/logs/app.log"),
-        Path("logs/app.log"),
-        settings.data_path / "logs" / "app.log",
+        Path("/app/logs/alima.log"),
+        Path("logs/alima.log"),
+        data_path / "logs" / "alima.log",
     ]
 
     log_file = None
