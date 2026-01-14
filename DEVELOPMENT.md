@@ -196,24 +196,82 @@ Standalone pages don't extend `base.html`, so they need manual CSRF setup:
 
 When adding or modifying forms, verify:
 
-1. **Find all templates with forms:**
+1. **Run the automated CSRF audit:**
    ```bash
-   find app/templates -name "*.html" -exec grep -l '<form' {} \;
+   python3 << 'EOF'
+   import re
+   from pathlib import Path
+
+   for html_file in Path('app/templates').rglob('*.html'):
+       content = html_file.read_text()
+       if not re.search(r'<form[^>]*method\s*=\s*["\']POST["\']', content, re.I):
+           continue
+
+       extends_base = bool(re.search(r'{%\s*extends\s+["\']base\.html["\']', content))
+       has_csrf = '{{ csrf_token(request) }}' in content
+       has_csrf_meta = 'name="csrf-token"' in content
+       has_csrf_js = 'x-csrf-token' in content
+
+       status = "✅" if has_csrf else "❌"
+       print(f"{status} {html_file}")
+
+       if not has_csrf:
+           print(f"   MISSING: Add '{{% from \"_csrf.html\" import csrf_token %}}' at top")
+           print(f"   MISSING: Add '{{{{ csrf_token(request) }}}}' inside <form> tag")
+
+       if not extends_base and not (has_csrf_meta and has_csrf_js):
+           print(f"   WARNING: Standalone page needs CSRF meta tag and JavaScript")
+   EOF
    ```
 
-2. **For each template with a POST form:**
-   - If it extends `base.html`: ✅ Has `{{ csrf_token(request) }}` in form
-   - If it's standalone: ✅ Has CSRF meta tag AND JavaScript
+2. **For NEW templates with POST forms:**
+   - **If extends `base.html`**:
+     - Add `{% from "_csrf.html" import csrf_token %}` at top
+     - Add `{{ csrf_token(request) }}` as first line inside `<form>` tag
+   - **If standalone** (doesn't extend base.html):
+     - Add CSRF meta tag in `<head>`: `<meta name="csrf-token" content="{{ request.cookies.get('alima_csrf', '') }}">`
+     - Add `{% from "_csrf.html" import csrf_token %}` at top
+     - Add `{{ csrf_token(request) }}` in form
+     - Add CSRF JavaScript before `</body>` (see `forgot_password.html` for example)
 
 3. **Test the form:**
    - Submit should work without 403 CSRF errors
    - Check browser console for errors
+   - Test with unauthenticated user if applicable
+
+### Troubleshooting CSRF 403 Errors
+
+If you encounter 403 CSRF errors despite having the token in the form:
+
+1. **Check browser developer tools** → Network tab → Look at the failed POST request:
+   - Does it have an `x-csrf-token` header? (It should!)
+   - If missing, the JavaScript isn't running or can't find the cookie
+
+2. **Verify the CSRF cookie is set**:
+   - Browser dev tools → Application/Storage → Cookies
+   - Look for `alima_csrf` cookie
+   - If missing, the middleware isn't setting it (check for errors in logs)
+
+3. **Common issues**:
+   - **Pages that extend base.html but fail**: Check if JavaScript is loading properly
+   - **Unauthenticated users**: First page load should set the `alima_csrf` cookie via middleware
+   - **CORS/SameSite issues**: Cookie should have `SameSite=Lax` for email links
+   - **Missing import**: Template needs `{% from "_csrf.html" import csrf_token %}`
+
+4. **Test locally**:
+   ```bash
+   # Should show alima_csrf cookie being set
+   curl -v http://localhost:8000/auth/reset-password?token=test 2>&1 | grep -i "set-cookie"
+   ```
 
 ### Why This Mistake Happened
 
-**Root cause:** Standalone authentication pages (login, register, accept_invite) don't extend `base.html`, so they were missing the automatic CSRF JavaScript interception despite having the CSRF token macro in their forms.
+**Root cause:** It's easy to forget CSRF protection when creating new forms, especially standalone pages that don't extend `base.html`.
 
-**Lesson:** Always check for standalone pages when implementing security features that rely on `base.html`.
+**Lesson:**
+- Always run the CSRF audit script when adding new forms
+- Test form submission in browser dev tools to verify the `x-csrf-token` header is present
+- Standalone pages need manual CSRF JavaScript setup (copy from `forgot_password.html`)
 
 ## Password Hashing
 
