@@ -109,3 +109,13 @@ secrets/
 *.tmp
 tmp/
 temp/
+
+# Node.js / Frontend
+node_modules/
+package-lock.json
+yarn.lock
+# Don't commit bundled files - they should be built during deployment
+app/static/js/*.bundle.js
+app/static/js/*.bundle.css
+app/static/js/*.bundle.js.map
+app/static/js/*.bundle.css.map

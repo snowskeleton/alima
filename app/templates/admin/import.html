@@ -1,70 +1,100 @@
 {% extends "base.html" %}
-{% from "_csrf.html" import csrf_token %}
 
 {% block title %}Import Audiobook - Alima{% endblock %}
+
+{% block extra_css %}
+<!-- Uppy CSS (bundled) -->
+<link rel="stylesheet" href="/static/js/import.bundle.css">
+{% endblock %}
 
 {% block content %}
 <div class="page-header">
     <h1>Import Audiobook</h1>
-    <p>Upload a third-party audiobook file (.m4a, .m4b, or .mp3)</p>
+    <p>Upload a third-party audiobook file - metadata will be extracted automatically</p>
 </div>
 
-<form action="/admin/import/upload" method="POST" enctype="multipart/form-data">
-    {{ csrf_token(request) }}
-    <div class="form-group">
-        <label class="form-label">Audio File *</label>
-        <input type="file" name="audio_file" class="form-input" accept=".m4a,.m4b,.mp3" required>
-        <small class="form-help">Supported formats: .m4a, .m4b, .mp3</small>
-    </div>
+<div class="import-container">
+    <!-- Uppy Dashboard will render here -->
+    <div id="uppy-dashboard"></div>
 
-    <div class="form-group">
-        <label class="checkbox-label">
-            <input type="checkbox" name="extract_metadata" value="true" checked>
-            Extract metadata from file
-        </label>
-        <small class="form-help">Uncheck to manually enter all metadata</small>
+    <div class="import-help">
+        <h3>How it works:</h3>
+        <ol>
+            <li>Select or drag & drop your audiobook file (.m4a, .m4b, or .mp3)</li>
+            <li>Click "Upload" and watch the progress</li>
+            <li>Metadata (title, author, narrator, etc.) will be automatically extracted from the file</li>
+            <li>After upload, you can edit any metadata on the book detail page if needed</li>
+        </ol>
     </div>
+</div>
 
-    <h3>Metadata (Optional - Override Extracted)</h3>
+<style>
+.import-container {
+    max-width: 900px;
+    margin: 0 auto;
+}
 
-    <div class="form-group">
-        <label class="form-label">Title</label>
-        <input type="text" name="title" class="form-input">
-    </div>
+#uppy-dashboard {
+    min-height: 450px;
+    margin-bottom: 2rem;
+}
 
-    <div class="form-group">
-        <label class="form-label">Author</label>
-        <input type="text" name="author" class="form-input">
-    </div>
+.import-help {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background: #f9fafb;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border-color);
+}
 
-    <div class="form-group">
-        <label class="form-label">Narrator</label>
-        <input type="text" name="narrator" class="form-input">
-    </div>
+.import-help h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    color: var(--secondary-color);
+    font-size: 1rem;
+}
 
-    <div class="form-group">
-        <label class="form-label">Series</label>
-        <input type="text" name="series" class="form-input">
-    </div>
+.import-help ol {
+    margin: 0;
+    padding-left: 1.5rem;
+    color: var(--secondary-color);
+}
 
-    <div class="form-group">
-        <label class="form-label">Series Position</label>
-        <input type="text" name="series_position" class="form-input" placeholder="e.g. 1, 2, 3">
-    </div>
+.import-help li {
+    margin-bottom: 0.5rem;
+}
 
-    <div class="form-group">
-        <label class="form-label">Description</label>
-        <textarea name="description" class="form-input" rows="4"></textarea>
-    </div>
+/* Custom Uppy styling to match our theme */
+.uppy-Dashboard-inner {
+    border: 2px dashed #d1d5db !important;
+    border-radius: 0.5rem !important;
+    background: white !important;
+}
 
-    <div class="form-group">
-        <label class="form-label">Publisher</label>
-        <input type="text" name="publisher" class="form-input">
-    </div>
+.uppy-Dashboard-AddFiles {
+    border: none !important;
+}
 
-    <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Import Audiobook</button>
-        <a href="/library" class="btn btn-secondary">Cancel</a>
-    </div>
-</form>
+.uppy-Dashboard-AddFiles-title {
+    color: #1f2937 !important;
+    font-weight: 600 !important;
+}
+
+.uppy-DashboardContent-bar {
+    background: #f9fafb !important;
+}
+
+/* Make sure the browse button is visible */
+.uppy-Dashboard-browse {
+    color: #3b82f6 !important;
+    font-weight: 600 !important;
+}
+
+.uppy-Dashboard-browse:hover {
+    text-decoration: underline !important;
+}
+</style>
+
+<!-- Load bundled Uppy JavaScript -->
+<script type="module" src="/static/js/import.bundle.js"></script>
 {% endblock %}

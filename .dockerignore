@@ -60,3 +60,9 @@ test_*.py
 .claude/
 snowskeleton/
 mkb79/
+
+# Node.js / Frontend (will be built inside container)
+node_modules/
+app/static/js/*.bundle.js
+app/static/js/*.bundle.css
+app/static/js/*.bundle.*.map

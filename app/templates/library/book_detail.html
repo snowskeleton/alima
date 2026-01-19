@@ -233,6 +233,76 @@
             {% endif %}
         </div>
 
+        <!-- Metadata Editor (for imported books) -->
+        {% if book.source.value == 'imported' %}
+        <div class="metadata-editor">
+            <h3>
+                Edit Metadata
+                <button type="button" class="btn btn-sm btn-secondary" onclick="toggleMetadataForm()">
+                    <span id="toggle-text">Show</span> Editor
+                </button>
+            </h3>
+            <div id="metadata-form" class="metadata-form" style="display: none;">
+                <form action="/admin/import/update-metadata/{{ book.id }}" method="POST">
+                    {{ csrf_token(request) }}
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Title</label>
+                            <input type="text" name="title" class="form-input" value="{{ book.title }}" placeholder="Leave empty to keep current">
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Subtitle</label>
+                            <input type="text" name="subtitle" class="form-input" value="{{ book.subtitle or '' }}" placeholder="Leave empty to clear">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Author</label>
+                            <input type="text" name="author" class="form-input" value="{{ book.author }}" placeholder="Leave empty to keep current">
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Narrator</label>
+                            <input type="text" name="narrator" class="form-input" value="{{ book.narrator or '' }}" placeholder="Leave empty to clear">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Series</label>
+                            <input type="text" name="series" class="form-input" value="{{ book.series or '' }}" placeholder="Leave empty to clear">
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Series Position</label>
+                            <input type="text" name="series_position" class="form-input" value="{{ book.series_position or '' }}" placeholder="e.g. 1, 2, 3">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Publisher</label>
+                        <input type="text" name="publisher" class="form-input" value="{{ book.publisher or '' }}" placeholder="Leave empty to clear">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Description</label>
+                        <textarea name="description" class="form-input" rows="4" placeholder="Leave empty to clear">{{ book.description or '' }}</textarea>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Update Metadata</button>
+                        <button type="submit" name="re_extract" value="true" class="btn btn-secondary" onclick="return confirm('This will re-extract metadata from the audio file. Any manual changes will be overwritten. Continue?')">
+                            Re-Extract from File
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Live download status -->
         {% if not book.file_path and book.source.value == 'audible' %}
         <div class="download-status-container">
@@ -496,6 +566,69 @@
     color: white;
 }
 
+.metadata-editor {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background-color: #f9fafb;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border-color);
+}
+
+.metadata-editor h3 {
+    font-size: 1.125rem;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.metadata-form {
+    margin-top: 1rem;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--secondary-color);
+    margin-bottom: 0.5rem;
+}
+
+.form-input {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.375rem;
+    font-size: 0.95rem;
+}
+
+.form-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.form-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+}
+
+.btn-sm {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+}
+
 @media (max-width: 768px) {
     .book-detail {
         grid-template-columns: 1fr;
@@ -504,6 +637,25 @@
     .metadata-grid {
         grid-template-columns: 1fr;
     }
+
+    .form-row {
+        grid-template-columns: 1fr;
+    }
 }
 </style>
+
+<script>
+function toggleMetadataForm() {
+    const form = document.getElementById('metadata-form');
+    const toggleText = document.getElementById('toggle-text');
+
+    if (form.style.display === 'none') {
+        form.style.display = 'block';
+        toggleText.textContent = 'Hide';
+    } else {
+        form.style.display = 'none';
+        toggleText.textContent = 'Show';
+    }
+}
+</script>
 {% endblock %}

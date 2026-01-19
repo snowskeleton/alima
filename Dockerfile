@@ -4,15 +4,27 @@ FROM python:3.14.2
 # Set working directory
 WORKDIR /app
 
+# Install Node.js for frontend build
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
 # Copy requirements first for better caching
 COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy package.json and install npm dependencies
+COPY package.json package-lock.json* ./
+RUN npm install
+
 # Copy application code
 COPY app/ ./app/
 COPY cli.py .
+
+# Build frontend bundles
+RUN npm run build
 
 # Create data directories
 RUN mkdir -p /app/data/audiobooks/unassigned \
