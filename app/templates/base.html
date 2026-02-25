@@ -93,8 +93,11 @@
 
     <!-- Global CSRF Token Helpers -->
     <script>
-        // Get CSRF token from meta tag (reads from alima_csrf cookie)
+        // Get CSRF token from browser cookie (not the meta tag, which may be stale on first load)
         function getCsrfToken() {
+            const match = document.cookie.match(/(?:^|;\s*)alima_csrf=([^;]*)/);
+            if (match) return decodeURIComponent(match[1]);
+            // Fallback to meta tag
             const token = document.querySelector('meta[name="csrf-token"]');
             return token ? token.getAttribute('content') : '';
         }
