@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.main import app
-from app.models import Book, DownloadQueue, Feed, FeedBook, Invite, User, UserRole
+from app.models import Book, DownloadQueue, Feed, FeedBook, User, UserRole
 
 
 @pytest.mark.unit
@@ -123,39 +123,36 @@ class TestDatabaseIndexes:
 class TestForeignKeyCascades:
     """Test foreign key cascade behavior."""
 
-    def test_delete_user_cascades_to_invites(self, db: Session):
-        """Test that deleting a user cascades to invites."""
+    def test_delete_user_does_not_break_magic_links(self, db: Session):
+        """Test that deleting a user does not break magic_links (they reference email, not FK)."""
+        from app.models import MagicLink
+
         # Create test user
         user = User(
             email="cascade_test@example.com",
-            password_hash="test_hash",
+            password_hash=None,
             role=UserRole.ADMIN
         )
         db.add(user)
         db.commit()
 
-        # Create invite created by this user
-        invite = Invite(
-            email="invited@example.com",
+        # Create magic link for this user
+        magic_link = MagicLink(
+            email="cascade_test@example.com",
             token="test_token_cascade",
-            created_by=user.id,
             expires_at="2099-01-01 00:00:00",
-            role=UserRole.USER
         )
-        db.add(invite)
+        db.add(magic_link)
         db.commit()
 
-        invite_id = invite.id
+        link_id = magic_link.id
 
-        # Delete user
+        # Delete user - magic link has no FK, so it should stay
         db.delete(user)
         db.commit()
 
-        # Invite should be deleted (CASCADE) or error if not set up yet
-        result = db.query(Invite).filter(Invite.id == invite_id).first()
-        # Either deleted or cascade not set up yet (migration pending)
-        # Just verify the query works
-        assert result is None or result.created_by is None
+        result = db.query(MagicLink).filter(MagicLink.id == link_id).first()
+        assert result is not None
 
     def test_delete_feed_cascades_to_feed_books(self, db: Session):
         """Test that deleting a feed cascades to feed_books."""

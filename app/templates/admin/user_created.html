@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% from "_csrf.html" import csrf_token %}
 
 {% block title %}User Created - Alima{% endblock %}
 
@@ -7,7 +6,7 @@
 <div class="success-container">
     <div class="success-card">
         <div class="success-icon">
-            ✓
+            &#10003;
         </div>
 
         <h1>User Created Successfully</h1>
@@ -17,40 +16,13 @@
         <div class="info-section">
             <p><strong>Role:</strong> {{ new_user.role.value }}</p>
             <p class="text-muted">A default "My Library" feed has been created for this user.</p>
+            <p class="text-muted">A login link has been sent to the user's email.</p>
         </div>
 
-        <div class="reset-section">
-            <h2>Send Password Reset Link</h2>
-            <p>The user has been created with a temporary password. Send them a password reset link to set their own password.</p>
-
-            <div class="reset-url-container">
-                <label>Password Reset Link:</label>
-                <div class="url-box">
-                    <input
-                        type="text"
-                        id="resetUrl"
-                        value="{{ reset_url }}"
-                        readonly
-                        onclick="this.select()"
-                    >
-                    <button class="btn btn-secondary btn-sm" onclick="copyResetUrl()">
-                        Copy Link
-                    </button>
-                </div>
-                <p class="text-muted small">This link expires in 24 hours.</p>
-            </div>
-
-            <div class="action-buttons">
-                <button
-                    class="btn btn-primary"
-                    onclick="sendPasswordReset({{ new_user.id }}, '{{ new_user.email }}')"
-                >
-                    Send Reset Email
-                </button>
-                <a href="/admin/users" class="btn btn-secondary">
-                    Back to Users
-                </a>
-            </div>
+        <div class="action-buttons">
+            <a href="/admin/users" class="btn btn-primary">
+                Back to Users
+            </a>
         </div>
     </div>
 </div>
@@ -112,47 +84,6 @@
     margin: 0.5rem 0;
 }
 
-.reset-section {
-    text-align: left;
-    margin-top: 2rem;
-}
-
-.reset-section h2 {
-    font-size: 1.25rem;
-    margin-bottom: 1rem;
-}
-
-.reset-section > p {
-    color: var(--secondary-color);
-    margin-bottom: 1.5rem;
-}
-
-.reset-url-container {
-    margin-bottom: 2rem;
-}
-
-.reset-url-container label {
-    display: block;
-    font-weight: 500;
-    margin-bottom: 0.5rem;
-}
-
-.url-box {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
-}
-
-.url-box input {
-    flex: 1;
-    padding: 0.75rem;
-    border: 1px solid var(--border-color);
-    border-radius: 0.375rem;
-    font-family: monospace;
-    font-size: 0.875rem;
-    background: #f8f9fa;
-}
-
 .action-buttons {
     display: flex;
     gap: 1rem;
@@ -180,66 +111,8 @@
     background-color: #0056b3;
 }
 
-.btn-secondary {
-    background-color: var(--secondary-color);
-    color: white;
-}
-
-.btn-secondary:hover {
-    background-color: #5a6268;
-}
-
-.btn-success {
-    background-color: #28a745;
-    color: white;
-}
-
-.btn-sm {
-    padding: 0.5rem 1rem;
-    font-size: 0.875rem;
-}
-
 .text-muted {
     color: var(--secondary-color);
 }
-
-.small {
-    font-size: 0.875rem;
-}
 </style>
-
-<script>
-function copyResetUrl() {
-    const urlInput = document.getElementById('resetUrl');
-    urlInput.select();
-    urlInput.setSelectionRange(0, 99999); // For mobile devices
-
-    navigator.clipboard.writeText(urlInput.value).then(() => {
-        const button = event.target;
-        const originalText = button.textContent;
-        button.textContent = 'Copied!';
-        button.classList.add('btn-success');
-
-        setTimeout(() => {
-            button.textContent = originalText;
-            button.classList.remove('btn-success');
-        }, 2000);
-    });
-}
-
-async function sendPasswordReset(userId, userEmail) {
-    if (!confirm(`Send password reset email to ${userEmail}?`)) {
-        return;
-    }
-
-    const response = await fetchWithCsrf(`/admin/users/${userId}/send-reset`, {
-        method: 'POST',
-    });
-
-    const data = await response.json();
-    if (data.success) {
-        window.location.reload();
-    }
-}
-</script>
 {% endblock %}

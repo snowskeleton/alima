@@ -12,7 +12,7 @@ from app.models import (
     Feed,
     FeedBook,
     FeedType,
-    Invite,
+    MagicLink,
     MetadataSource,
     ReplicationConfig,
     ReplicationLog,
@@ -59,28 +59,27 @@ class TestUserModel:
 
 
 @pytest.mark.unit
-class TestInviteModel:
-    """Test Invite model."""
+class TestMagicLinkModel:
+    """Test MagicLink model."""
 
-    def test_create_invite(self, test_db: Session, test_admin: User):
-        """Test creating an invite."""
-        invite = Invite(
-            email="invited@example.com",
+    def test_create_magic_link(self, test_db: Session):
+        """Test creating a magic link."""
+        from datetime import datetime, timedelta
+
+        magic_link = MagicLink(
+            email="user@example.com",
             token="unique_token_123",
-            role=UserRole.USER,
-            created_by=test_admin.id,
-            expires_at=test_admin.created_at,  # Use a datetime
+            expires_at=datetime.utcnow() + timedelta(minutes=15),
             used=False,
         )
-        test_db.add(invite)
+        test_db.add(magic_link)
         test_db.commit()
-        test_db.refresh(invite)
+        test_db.refresh(magic_link)
 
-        assert invite.id is not None
-        assert invite.email == "invited@example.com"
-        assert invite.token == "unique_token_123"
-        assert invite.used is False
-        assert invite.creator.id == test_admin.id
+        assert magic_link.id is not None
+        assert magic_link.email == "user@example.com"
+        assert magic_link.token == "unique_token_123"
+        assert magic_link.used is False
 
 
 @pytest.mark.unit

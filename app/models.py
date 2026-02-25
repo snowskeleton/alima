@@ -113,51 +113,27 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.USER)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_login: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     receive_notifications: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     # Relationships
-    invites_created: Mapped[list["Invite"]] = relationship(
-        "Invite", back_populates="creator"
-    )
     feeds: Mapped[list["Feed"]] = relationship("Feed", back_populates="user")
 
 
-class Invite(Base):
-    """User invite model."""
+class MagicLink(Base):
+    """Magic link token model for passwordless authentication."""
 
-    __tablename__ = "invites"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    email: Mapped[str] = mapped_column(String(255))
-    token: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.USER)
-    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    expires_at: Mapped[datetime] = mapped_column(DateTime)
-    used: Mapped[bool] = mapped_column(Boolean, default=False)
-
-    # Relationships
-    creator: Mapped["User"] = relationship("User", back_populates="invites_created")
-
-
-class PasswordReset(Base):
-    """Password reset token model."""
-
-    __tablename__ = "password_resets"
+    __tablename__ = "magic_links"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    email: Mapped[str] = mapped_column(String(255), index=True)
     token: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     used: Mapped[bool] = mapped_column(Boolean, default=False)
-
-    # Relationships
-    user: Mapped["User"] = relationship("User")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class AudibleAccount(Base):

@@ -100,6 +100,13 @@
             background-color: #0056b3;
         }
 
+        .login-hint {
+            text-align: center;
+            margin-top: 1.5rem;
+            color: var(--secondary-color);
+            font-size: 0.875rem;
+        }
+
         /* Flash message styles */
         .flash-messages {
             margin-bottom: 2rem;
@@ -162,28 +169,14 @@
                     class="form-input"
                     required
                     autofocus
+                    placeholder="your@email.com"
                 >
             </div>
 
-            <div class="form-group">
-                <label for="password" class="form-label">Password</label>
-                <input
-                    type="password"
-                    id="password"
-                    name="password"
-                    class="form-input"
-                    required
-                >
-            </div>
-
-            <button type="submit" class="btn btn-primary">Sign In</button>
+            <button type="submit" class="btn btn-primary">Send me a login link</button>
         </form>
 
-        <div style="text-align: center; margin-top: 1.5rem;">
-            <a href="/auth/forgot-password" style="color: var(--primary-color); text-decoration: none; font-size: 0.875rem;">
-                Forgot your password?
-            </a>
-        </div>
+        <p class="login-hint">We'll email you a magic link to sign in.</p>
     </div>
 
     <script>
@@ -220,7 +213,11 @@
                         if (response.redirected) {
                             window.location.href = response.url;
                         } else if (response.ok) {
-                            window.location.reload();
+                            return response.text().then(html => {
+                                document.open();
+                                document.write(html);
+                                document.close();
+                            });
                         } else {
                             return response.text().then(text => {
                                 alert('Login failed: ' + response.statusText);

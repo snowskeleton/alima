@@ -4,11 +4,12 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.auth import (
-    authenticate_user,
     create_access_token,
+    create_magic_link,
     create_user,
     get_password_hash,
     update_last_login,
+    verify_magic_link,
     verify_password,
     verify_token,
 )
@@ -17,7 +18,7 @@ from app.models import User
 
 @pytest.mark.unit
 class TestPasswordHashing:
-    """Test password hashing functions."""
+    """Test password hashing functions (backward compat)."""
 
     def test_password_hash(self):
         """Test password hashing."""
@@ -25,7 +26,6 @@ class TestPasswordHashing:
         hashed = get_password_hash(password)
 
         assert hashed != password
-        assert hashed.startswith("$2b$")  # bcrypt prefix
 
     def test_verify_password_correct(self):
         """Test password verification with correct password."""
@@ -77,27 +77,47 @@ class TestJWTTokens:
 
 
 @pytest.mark.unit
-class TestUserAuthentication:
-    """Test user authentication."""
+class TestMagicLinks:
+    """Test magic link creation and verification."""
 
-    def test_authenticate_user_success(self, test_db: Session, test_user: User):
-        """Test successful user authentication."""
-        user = authenticate_user(test_db, "test@example.com", "testpassword")
+    def test_create_magic_link(self, test_db: Session, test_user: User):
+        """Test creating a magic link."""
+        token = create_magic_link(test_db, test_user.email)
+
+        assert token is not None
+        assert isinstance(token, str)
+        assert len(token) > 0
+
+    def test_verify_magic_link_valid(self, test_db: Session, test_user: User):
+        """Test verifying a valid magic link."""
+        token = create_magic_link(test_db, test_user.email)
+        user = verify_magic_link(test_db, token)
 
         assert user is not None
         assert user.id == test_user.id
         assert user.email == test_user.email
 
-    def test_authenticate_user_wrong_password(self, test_db: Session, test_user: User):
-        """Test authentication with wrong password."""
-        user = authenticate_user(test_db, "test@example.com", "wrongpassword")
-
+    def test_verify_magic_link_invalid(self, test_db: Session):
+        """Test verifying an invalid magic link."""
+        user = verify_magic_link(test_db, "nonexistent-token")
         assert user is None
 
-    def test_authenticate_user_nonexistent(self, test_db: Session):
-        """Test authentication with nonexistent user."""
-        user = authenticate_user(test_db, "nonexistent@example.com", "password")
+    def test_verify_magic_link_used_twice(self, test_db: Session, test_user: User):
+        """Test that a magic link can only be used once."""
+        token = create_magic_link(test_db, test_user.email)
 
+        # First use should succeed
+        user = verify_magic_link(test_db, token)
+        assert user is not None
+
+        # Second use should fail
+        user2 = verify_magic_link(test_db, token)
+        assert user2 is None
+
+    def test_verify_magic_link_no_user(self, test_db: Session):
+        """Test magic link for nonexistent user returns None."""
+        token = create_magic_link(test_db, "nonexistent@example.com")
+        user = verify_magic_link(test_db, token)
         assert user is None
 
 
@@ -105,18 +125,27 @@ class TestUserAuthentication:
 class TestUserCreation:
     """Test user creation."""
 
-    def test_create_user(self, test_db: Session):
-        """Test creating a new user."""
-        user = create_user(test_db, "newuser@example.com", "password123", "user")
+    def test_create_user_without_password(self, test_db: Session):
+        """Test creating a user without a password (magic link only)."""
+        user = create_user(test_db, "newuser@example.com", role="user")
 
         assert user.id is not None
         assert user.email == "newuser@example.com"
         assert user.role.value == "user"
+        assert user.password_hash is None
+
+    def test_create_user_with_password(self, test_db: Session):
+        """Test creating a user with a password (backward compat)."""
+        user = create_user(test_db, "newuser@example.com", "password123", "user")
+
+        assert user.id is not None
+        assert user.email == "newuser@example.com"
+        assert user.password_hash is not None
         assert verify_password("password123", user.password_hash)
 
     def test_create_admin(self, test_db: Session):
         """Test creating an admin user."""
-        admin = create_user(test_db, "admin@example.com", "adminpass", "admin")
+        admin = create_user(test_db, "admin@example.com", role="admin")
 
         assert admin.id is not None
         assert admin.email == "admin@example.com"
@@ -141,119 +170,78 @@ class TestLastLogin:
 class TestAuthRoutes:
     """Test authentication routes."""
 
-    def test_login_page(self, client):
+    def test_login_page(self, client, test_user):
         """Test login page is accessible."""
-        from fastapi.testclient import TestClient
         response = client.get("/auth/login")
         assert response.status_code == 200
-        assert b"Sign In" in response.content
+        assert b"Send me a login link" in response.content
 
     def test_login_redirects_if_already_logged_in(self, authenticated_client):
         """Test login page redirects if already logged in."""
-        from fastapi.testclient import TestClient
         response = authenticated_client.get("/auth/login", follow_redirects=False)
         assert response.status_code == 303
         assert response.headers["location"] == "/library"
 
-    def test_login_success(self, client, test_user):
-        """Test successful login."""
-        from fastapi.testclient import TestClient
+    def _get_csrf_token(self, client, url="/auth/login"):
+        """Helper to get a CSRF token by visiting a page first."""
+        response = client.get(url)
+        csrf_cookie = response.cookies.get("alima_csrf", "")
+        return csrf_cookie
+
+    def test_login_shows_check_email(self, client, test_user):
+        """Test submitting login shows check-email page."""
+        csrf = self._get_csrf_token(client)
         response = client.post(
             "/auth/login",
             data={
                 "email": "test@example.com",
-                "password": "testpassword",
             },
+            headers={"x-csrf-token": csrf},
+        )
+        assert response.status_code == 200
+        assert b"Check your email" in response.content
+
+    def test_login_nonexistent_email_still_shows_check_email(self, client, test_user):
+        """Test submitting nonexistent email still shows check-email (prevents enumeration)."""
+        csrf = self._get_csrf_token(client)
+        response = client.post(
+            "/auth/login",
+            data={
+                "email": "nonexistent@example.com",
+            },
+            headers={"x-csrf-token": csrf},
+        )
+        assert response.status_code == 200
+        assert b"Check your email" in response.content
+
+    def test_magic_link_login(self, client, test_db, test_user):
+        """Test magic link creates session."""
+        token = create_magic_link(test_db, test_user.email)
+
+        response = client.get(
+            f"/auth/magic-link?token={token}",
             follow_redirects=False,
         )
         assert response.status_code == 303
         assert "session_token" in response.cookies
 
-    def test_login_wrong_password(self, client, test_user):
-        """Test login with wrong password."""
-        from fastapi.testclient import TestClient
-        response = client.post(
-            "/auth/login",
-            data={
-                "email": "test@example.com",
-                "password": "wrongpassword",
-            },
-        )
-        assert response.status_code == 401
+    def test_magic_link_expired(self, client, test_user):
+        """Test expired/invalid magic link shows error page."""
+        response = client.get("/auth/magic-link?token=invalid-token")
+        assert response.status_code == 200
+        assert b"expired" in response.content.lower()
 
     def test_logout(self, authenticated_client):
         """Test logout."""
-        from fastapi.testclient import TestClient
         response = authenticated_client.get("/auth/logout", follow_redirects=False)
         assert response.status_code == 303
         assert response.headers["location"] == "/auth/login"
 
-    def test_accept_invite_page(self, client, test_db):
-        """Test accept invite page with valid token."""
-        from datetime import datetime, timedelta
-        from app.models import Invite, UserRole
-
-        # Create a test invite
-        invite = Invite(
-            email="newinvite@example.com",
-            token="valid-invite-token",
-            role=UserRole.USER,
-            created_by=1,
-            expires_at=datetime.utcnow() + timedelta(days=7),
-        )
-        test_db.add(invite)
-        test_db.commit()
-
-        response = client.get("/auth/accept-invite?token=valid-invite-token")
-        assert response.status_code == 200
-        assert b"newinvite@example.com" in response.content
-
-    def test_accept_invite_invalid_token(self, client):
-        """Test accept invite page with invalid token."""
-        response = client.get("/auth/accept-invite?token=invalid-token")
-        assert response.status_code == 404
-
-    def test_accept_invite_creates_user(self, client, test_db):
-        """Test accepting invite creates user account."""
-        from datetime import datetime, timedelta
-        from app.models import Invite, User, UserRole
-
-        # Create a test invite
-        invite = Invite(
-            email="newaccount@example.com",
-            token="new-account-token",
-            role=UserRole.USER,
-            created_by=1,
-            expires_at=datetime.utcnow() + timedelta(days=7),
-        )
-        test_db.add(invite)
-        test_db.commit()
-
-        response = client.post(
-            "/auth/accept-invite",
-            data={
-                "token": "new-account-token",
-                "password": "newpassword123",
-                "password_confirm": "newpassword123",
-            },
-            follow_redirects=False,
-        )
+    def test_profile_page_requires_auth(self, client, test_user):
+        """Test profile page requires authentication (redirects to login)."""
+        response = client.get("/auth/profile", follow_redirects=False)
         assert response.status_code == 303
-        assert "session_token" in response.cookies
-
-        # Verify user was created
-        user = test_db.query(User).filter(User.email == "newaccount@example.com").first()
-        assert user is not None
-        assert verify_password("newpassword123", user.password_hash)
-
-        # Verify invite was marked as used
-        test_db.refresh(invite)
-        assert invite.used is True
-
-    def test_profile_page_requires_auth(self, client):
-        """Test profile page requires authentication."""
-        response = client.get("/auth/profile")
-        assert response.status_code == 401
+        assert "/auth/login" in response.headers["location"]
 
     def test_profile_page_authenticated(self, authenticated_client, test_user):
         """Test profile page with authenticated user."""

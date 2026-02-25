@@ -6,7 +6,7 @@
 {% block content %}
 <div class="page-header">
     <h1>User Management</h1>
-    <p>Manage system users, permissions, and invitations</p>
+    <p>Manage system users and permissions</p>
 </div>
 
 <!-- Create User Section -->
@@ -37,56 +37,9 @@
                 </div>
             </div>
         </form>
-        <p class="form-hint">User will be created with a temporary password. You'll be able to send them a password reset link on the next page.</p>
+        <p class="form-hint">A login link will be sent to the user's email address.</p>
     </div>
 </div>
-
-<!-- Pending Invites Section -->
-{% if invites %}
-<div class="section-card">
-    <h2>Pending Invitations ({{ invites|length }})</h2>
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Invited By</th>
-                <th>Created</th>
-                <th>Expires</th>
-                <th>Status</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for invite in invites %}
-            <tr>
-                <td><strong>{{ invite.email }}</strong></td>
-                <td>
-                    <span class="badge {% if invite.role.value == 'admin' %}badge-primary{% else %}badge-secondary{% endif %}">
-                        {{ invite.role.value }}
-                    </span>
-                </td>
-                <td>{{ invite.creator.email }}</td>
-                <td>{{ invite.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                <td>{{ invite.expires_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                <td>
-                    {% if invite.expires_at < now %}
-                    <span class="badge badge-danger">Expired</span>
-                    {% else %}
-                    <span class="badge badge-success">Active</span>
-                    {% endif %}
-                </td>
-                <td class="actions">
-                    <button class="btn btn-sm btn-danger" onclick="revokeInvite({{ invite.id }}, '{{ invite.email }}')">
-                        Revoke
-                    </button>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endif %}
 
 <!-- Users Section -->
 <div class="section-card">
@@ -151,8 +104,8 @@
                 </td>
                 <td class="actions">
                     {% if user.id != current_user.id %}
-                    <button class="btn btn-sm btn-primary" onclick="sendPasswordResetToUser({{ user.id }}, '{{ user.email }}')">
-                        Send Password Reset
+                    <button class="btn btn-sm btn-primary" onclick="sendLoginLink({{ user.id }}, '{{ user.email }}')">
+                        Send Login Link
                     </button>
                     <button class="btn btn-sm btn-secondary" onclick="showChangeRoleModal({{ user.id }}, '{{ user.email }}', '{{ user.role.value }}')">
                         Change Role
@@ -550,33 +503,18 @@ async function deleteUser(userId, userEmail) {
     }
 }
 
-async function revokeInvite(inviteId, inviteEmail) {
-    if (!confirm(`Are you sure you want to revoke the invitation for '${inviteEmail}'?`)) {
+async function sendLoginLink(userId, userEmail) {
+    if (!confirm(`Send login link to '${userEmail}'?`)) {
         return;
     }
 
-    const response = await fetchWithCsrf(`/admin/invites/${inviteId}`, {
-        method: 'DELETE',
-    });
-
-    const data = await response.json();
-    if (data.success) {
-        window.location.reload();
-    }
-}
-
-async function sendPasswordResetToUser(userId, userEmail) {
-    if (!confirm(`Send password reset email to '${userEmail}'?`)) {
-        return;
-    }
-
-    const response = await fetchWithCsrf(`/admin/users/${userId}/send-reset`, {
+    const response = await fetchWithCsrf(`/admin/users/${userId}/send-login-link`, {
         method: 'POST',
     });
 
     const data = await response.json();
     if (data.success) {
-        window.location.reload();
+        alert(`Login link sent to ${userEmail}`);
     }
 }
 

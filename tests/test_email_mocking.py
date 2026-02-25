@@ -16,31 +16,35 @@ class TestEmailMocking:
         assert mock_email_service is not None
         assert "send_invite_email" in mock_email_service
         assert "send_test_email" in mock_email_service
-        assert "send_password_reset_email" in mock_email_service
+        assert "send_magic_link_email" in mock_email_service
 
     def test_send_invite_does_not_send_real_email(
         self, admin_client: TestClient, mock_email_service
     ):
-        """Verify that sending an invite does not send real emails."""
-        # Send an invite
+        """Verify that creating a user does not send real emails."""
+        # Get CSRF token first
+        get_response = admin_client.get("/admin/users")
+        csrf = get_response.cookies.get("alima_csrf", "")
+
         response = admin_client.post(
             "/admin/invites/send",
             data={
-                "email": "test@example.com",
+                "email": "test-new@example.com",
                 "role": "user",
             },
+            headers={"x-csrf-token": csrf},
             follow_redirects=False,
         )
 
         # Should succeed
         assert response.status_code == 303
 
-        # Verify email mock was called (but no real email sent)
-        mock_email_service["send_invite_email"].assert_called_once()
+        # Verify magic link email mock was called
+        mock_email_service["send_magic_link_email"].assert_called_once()
 
         # Get the call arguments
-        call_args = mock_email_service["send_invite_email"].call_args
-        assert call_args.kwargs["recipient_email"] == "test@example.com"
+        call_args = mock_email_service["send_magic_link_email"].call_args
+        assert call_args.kwargs["recipient_email"] == "test-new@example.com"
 
     def test_smtp_disabled_in_test_environment(self):
         """Verify SMTP is disabled in test environment."""

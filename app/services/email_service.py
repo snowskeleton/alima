@@ -177,20 +177,19 @@ If you didn't expect this invitation, you can safely ignore this email.
             return False
 
     @staticmethod
-    async def send_password_reset_email(
-        recipient_email: str, reset_token: str
+    async def send_magic_link_email(
+        recipient_email: str, magic_link_token: str
     ) -> bool:
         """
-        Send a password reset email.
+        Send a magic link login email.
 
         Args:
-            recipient_email: Email address to send reset link to
-            reset_token: Unique reset token
+            recipient_email: Email address to send login link to
+            magic_link_token: Unique magic link token
 
         Returns:
             True if email sent successfully, False otherwise
         """
-        # Get settings from database
         from .settings_service import SettingsService
         from ..database import SessionLocal
 
@@ -211,16 +210,14 @@ If you didn't expect this invitation, you can safely ignore this email.
         # Skip if SMTP not configured
         if not smtp_host or not smtp_from:
             logger.warning(
-                f"SMTP not configured. Reset URL for {recipient_email}: "
-                f"{domain}/auth/reset-password?token={reset_token}"
+                f"SMTP not configured. Magic link for {recipient_email}: "
+                f"{domain}/auth/magic-link?token={magic_link_token}"
             )
             return False
 
-        # Build reset URL
-        reset_url = f"{domain}/auth/reset-password?token={reset_token}"
+        login_url = f"{domain}/auth/magic-link?token={magic_link_token}"
 
-        # Create email message
-        subject = f"{app_name} - Password Reset"
+        subject = f"{app_name} - Your Login Link"
 
         html_body = f"""
         <!DOCTYPE html>
@@ -257,15 +254,14 @@ If you didn't expect this invitation, you can safely ignore this email.
         </head>
         <body>
             <div class="container">
-                <h2>Password Reset Request</h2>
-                <p>You requested to reset your password for {app_name}.</p>
-                <p>Click the button below to reset your password:</p>
-                <a href="{reset_url}" class="button">Reset Password</a>
+                <h2>Your Login Link</h2>
+                <p>Click the button below to sign in to {app_name}:</p>
+                <a href="{login_url}" class="button">Sign In</a>
                 <p>Or copy and paste this link into your browser:</p>
-                <p><a href="{reset_url}">{reset_url}</a></p>
+                <p><a href="{login_url}">{login_url}</a></p>
                 <div class="footer">
-                    <p>This link will expire in 24 hours.</p>
-                    <p>If you didn't request a password reset, you can safely ignore this email.</p>
+                    <p>This link will expire in 15 minutes.</p>
+                    <p>If you didn't request this link, you can safely ignore this email.</p>
                 </div>
             </div>
         </body>
@@ -273,30 +269,25 @@ If you didn't expect this invitation, you can safely ignore this email.
         """
 
         text_body = f"""
-Password Reset Request
+Your Login Link
 
-You requested to reset your password for {app_name}.
+Click the link below to sign in to {app_name}:
+{login_url}
 
-Reset your password by visiting this link:
-{reset_url}
+This link will expire in 15 minutes.
 
-This link will expire in 24 hours.
-
-If you didn't request a password reset, you can safely ignore this email.
+If you didn't request this link, you can safely ignore this email.
         """
 
         try:
-            # Create message
             message = MIMEMultipart("alternative")
             message["From"] = f"{smtp_from_name} <{smtp_from}>" if smtp_from_name else smtp_from
             message["To"] = recipient_email
             message["Subject"] = subject
 
-            # Attach both plain text and HTML versions
             message.attach(MIMEText(text_body, "plain"))
             message.attach(MIMEText(html_body, "html"))
 
-            # Send email
             await aiosmtplib.send(
                 message,
                 hostname=smtp_host,
@@ -306,11 +297,11 @@ If you didn't request a password reset, you can safely ignore this email.
                 start_tls=True,
             )
 
-            logger.info(f"Password reset email sent successfully to {recipient_email}")
+            logger.info(f"Magic link email sent successfully to {recipient_email}")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to send password reset email to {recipient_email}: {e}")
+            logger.error(f"Failed to send magic link email to {recipient_email}: {e}")
             return False
 
     async def send_test_email(self, recipient_email: str) -> bool:

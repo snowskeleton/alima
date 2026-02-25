@@ -686,6 +686,109 @@ def run_migration_014_add_user_notifications(db: Session, engine) -> None:
         raise
 
 
+def run_migration_015_magic_links(db: Session, engine) -> None:
+    """Make password_hash nullable and create magic_links table."""
+    migration_name = "015_magic_links"
+
+    if has_migration_been_applied(db, migration_name):
+        logger.info(f"Migration {migration_name} already applied")
+        return
+
+    is_postgres = "postgresql" in str(engine.url)
+
+    logger.info(f"Running migration: {migration_name}")
+
+    try:
+        # Step 1: Make password_hash nullable
+        if is_postgres:
+            db.execute(text("""
+                ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL
+            """))
+        else:
+            # SQLite doesn't support ALTER COLUMN, but columns are nullable by default
+            # unless explicitly marked NOT NULL. We need to recreate the table or
+            # just skip since SQLite doesn't enforce NOT NULL on ALTER ADD.
+            # For SQLite, we'll create a new table and copy data.
+            result = db.execute(text("PRAGMA table_info(users)"))
+            columns = result.fetchall()
+            password_col = [c for c in columns if c[1] == 'password_hash']
+            if password_col and password_col[0][3] == 1:  # notnull flag
+                logger.info("Recreating users table with nullable password_hash (SQLite)...")
+                # Get current column definitions
+                col_defs = []
+                for col in columns:
+                    col_name = col[1]
+                    col_type = col[2]
+                    notnull = col[3]
+                    default = col[4]
+                    pk = col[5]
+
+                    parts = [col_name, col_type]
+                    if pk:
+                        parts.append("PRIMARY KEY AUTOINCREMENT")
+                    elif col_name == 'password_hash':
+                        # Make it nullable (skip NOT NULL)
+                        pass
+                    elif notnull:
+                        parts.append("NOT NULL")
+
+                    if default is not None:
+                        parts.append(f"DEFAULT {default}")
+
+                    col_defs.append(" ".join(parts))
+
+                col_names = [col[1] for col in columns]
+                col_list = ", ".join(col_names)
+                col_def_str = ", ".join(col_defs)
+
+                db.execute(text(f"CREATE TABLE users_new ({col_def_str})"))
+                db.execute(text(f"INSERT INTO users_new ({col_list}) SELECT {col_list} FROM users"))
+                db.execute(text("DROP TABLE users"))
+                db.execute(text("ALTER TABLE users_new RENAME TO users"))
+                # Recreate indexes
+                db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users(email)"))
+
+        db.commit()
+        logger.info("password_hash column is now nullable")
+
+        # Step 2: Create magic_links table
+        if is_postgres:
+            db.execute(text("""
+                CREATE TABLE IF NOT EXISTS magic_links (
+                    id SERIAL PRIMARY KEY,
+                    email VARCHAR(255) NOT NULL,
+                    token VARCHAR(255) NOT NULL UNIQUE,
+                    expires_at TIMESTAMP NOT NULL,
+                    used BOOLEAN DEFAULT FALSE NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+            """))
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_magic_links_email ON magic_links(email)"))
+            db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_magic_links_token ON magic_links(token)"))
+        else:
+            db.execute(text("""
+                CREATE TABLE IF NOT EXISTS magic_links (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email VARCHAR(255) NOT NULL,
+                    token VARCHAR(255) NOT NULL UNIQUE,
+                    expires_at DATETIME NOT NULL,
+                    used BOOLEAN DEFAULT 0 NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+            """))
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_magic_links_email ON magic_links(email)"))
+            db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_magic_links_token ON magic_links(token)"))
+
+        db.commit()
+        mark_migration_applied(db, migration_name)
+        logger.info(f"Migration {migration_name} completed successfully!")
+
+    except Exception as e:
+        logger.error(f"Migration {migration_name} failed: {e}", exc_info=True)
+        db.rollback()
+        raise
+
+
 def run_all_pending_migrations(db: Session) -> None:
     """Run all pending migrations in order."""
     from .database import engine
@@ -704,6 +807,7 @@ def run_all_pending_migrations(db: Session) -> None:
         run_migration_012_fix_lowercase_download_types,
         run_migration_013_add_indexes_and_cascades,
         run_migration_014_add_user_notifications,
+        run_migration_015_magic_links,
     ]
 
     for migration_func in migrations:

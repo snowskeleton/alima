@@ -58,17 +58,17 @@ def mock_email_service():
     """Mock EmailService to prevent sending real emails during tests."""
     with patch("app.services.email_service.EmailService.send_invite_email", new_callable=AsyncMock) as mock_send_invite, \
          patch("app.services.email_service.EmailService.send_test_email", new_callable=AsyncMock) as mock_send_test, \
-         patch("app.services.email_service.EmailService.send_password_reset_email", new_callable=AsyncMock) as mock_send_reset:
+         patch("app.services.email_service.EmailService.send_magic_link_email", new_callable=AsyncMock) as mock_send_magic:
 
         # Mock all email methods to return True (success)
         mock_send_invite.return_value = True
         mock_send_test.return_value = True
-        mock_send_reset.return_value = True
+        mock_send_magic.return_value = True
 
         yield {
             "send_invite_email": mock_send_invite,
             "send_test_email": mock_send_test,
-            "send_password_reset_email": mock_send_reset,
+            "send_magic_link_email": mock_send_magic,
         }
 
 

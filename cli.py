@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 # Add app directory to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from app.auth import create_user, get_password_hash
+from app.auth import create_magic_link, create_user
 from app.database import SessionLocal, init_db
 from app.models import User, UserRole
 
@@ -66,9 +66,8 @@ def create_admin(email: str, password: str):
 
 @cli.command()
 @click.option("--email", prompt=True, help="User email address")
-@click.option("--password", prompt=True, hide_input=True, confirmation_prompt=True, help="New password")
-def reset_password(email: str, password: str):
-    """Reset a user's password."""
+def send_login_link(email: str):
+    """Generate a magic login link for a user."""
     db = get_db()
     try:
         user = db.query(User).filter(User.email == email).first()
@@ -76,13 +75,13 @@ def reset_password(email: str, password: str):
             click.echo(f"❌ Error: User with email '{email}' not found")
             return
 
-        # Update password
-        user.password_hash = get_password_hash(password)
-        db.commit()
-        click.echo(f"✓ Password reset successfully for: {user.email}")
+        token = create_magic_link(db, email)
+        click.echo(f"✓ Magic link created for: {user.email}")
+        click.echo(f"  Login URL: /auth/magic-link?token={token}")
+        click.echo(f"  (Expires in 15 minutes)")
 
     except Exception as e:
-        click.echo(f"❌ Error resetting password: {e}")
+        click.echo(f"❌ Error creating magic link: {e}")
         db.rollback()
     finally:
         db.close()
