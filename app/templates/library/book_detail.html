@@ -117,6 +117,13 @@
                 <span class="badge">{{ book.source.value }}</span>
             </div>
 
+            {% if book.audible_account %}
+            <div class="metadata-item">
+                <strong>Library:</strong>
+                <span>{{ book.audible_account.username }} ({{ book.audible_account.marketplace }})</span>
+            </div>
+            {% endif %}
+
             <div class="metadata-item">
                 <strong>Added:</strong>
                 <span>{{ book.added_at.strftime('%Y-%m-%d %H:%M') }}</span>
