@@ -247,92 +247,32 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
+function bulkAction(url, ids) {
+    const formData = new FormData();
+    formData.append('entry_ids', ids.join(','));
+
+    fetchWithCsrf(url, { method: 'POST', body: formData })
+        .then(response => { window.location.reload(); })
+        .catch(error => { alert('Request failed. Please try again.'); });
+}
+
 function markSelectedAsRead() {
     const ids = getSelectedIds();
-    if (ids.length === 0) {
-        alert('No entries selected');
-        return;
-    }
-
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.action = '/admin/downloads/bulk-mark-read';
-
-    // Add CSRF token
-    const csrfInput = document.createElement('input');
-    csrfInput.type = 'hidden';
-    csrfInput.name = 'csrf_token';
-    csrfInput.value = getCsrfToken();
-    form.appendChild(csrfInput);
-
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = 'entry_ids';
-    input.value = ids.join(',');
-
-    form.appendChild(input);
-    document.body.appendChild(form);
-    form.submit();
+    if (ids.length === 0) { alert('No entries selected'); return; }
+    bulkAction('/admin/downloads/bulk-mark-read', ids);
 }
 
 function markSelectedAsUnread() {
     const ids = getSelectedIds();
-    if (ids.length === 0) {
-        alert('No entries selected');
-        return;
-    }
-
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.action = '/admin/downloads/bulk-mark-unread';
-
-    // Add CSRF token
-    const csrfInput = document.createElement('input');
-    csrfInput.type = 'hidden';
-    csrfInput.name = 'csrf_token';
-    csrfInput.value = getCsrfToken();
-    form.appendChild(csrfInput);
-
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = 'entry_ids';
-    input.value = ids.join(',');
-
-    form.appendChild(input);
-    document.body.appendChild(form);
-    form.submit();
+    if (ids.length === 0) { alert('No entries selected'); return; }
+    bulkAction('/admin/downloads/bulk-mark-unread', ids);
 }
 
 function removeSelected() {
     const ids = getSelectedIds();
-    if (ids.length === 0) {
-        alert('No entries selected');
-        return;
-    }
-
-    if (!confirm(`Are you sure you want to remove ${ids.length} entries from the queue?`)) {
-        return;
-    }
-
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.action = '/admin/downloads/bulk-remove';
-
-    // Add CSRF token
-    const csrfInput = document.createElement('input');
-    csrfInput.type = 'hidden';
-    csrfInput.name = 'csrf_token';
-    csrfInput.value = getCsrfToken();
-    form.appendChild(csrfInput);
-
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = 'entry_ids';
-    input.value = ids.join(',');
-
-    form.appendChild(input);
-    document.body.appendChild(form);
-    form.submit();
+    if (ids.length === 0) { alert('No entries selected'); return; }
+    if (!confirm(`Are you sure you want to remove ${ids.length} entries from the queue?`)) { return; }
+    bulkAction('/admin/downloads/bulk-remove', ids);
 }
 </script>
 
