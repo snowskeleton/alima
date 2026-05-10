@@ -238,6 +238,13 @@
                 </button>
             </form>
             {% endif %}
+
+            <!-- Delete book button (admin only) -->
+            {% if current_user.role.value == 'admin' %}
+            <button type="button" class="btn btn-danger" onclick="deleteBook({{ book.id }}, '{{ book.title|replace("'", "\\'") }}')">
+                🗑️ Delete Book
+            </button>
+            {% endif %}
         </div>
 
         <!-- Metadata Editor (for imported books) -->
@@ -652,6 +659,21 @@
 </style>
 
 <script>
+async function deleteBook(bookId, bookTitle) {
+    if (!confirm(`Are you sure you want to permanently delete '${bookTitle}'? This will remove the database record, audiobook file, and cover image. This action cannot be undone.`)) {
+        return;
+    }
+
+    const response = await fetchWithCsrf(`/books/${bookId}`, {
+        method: 'DELETE',
+    });
+
+    const data = await response.json();
+    if (data.message) {
+        window.location.href = '/library';
+    }
+}
+
 function toggleMetadataForm() {
     const form = document.getElementById('metadata-form');
     const toggleText = document.getElementById('toggle-text');

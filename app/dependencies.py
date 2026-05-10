@@ -1,15 +1,19 @@
 """FastAPI dependency injection functions."""
 
+import hashlib
 from typing import Optional
 from urllib.parse import quote
 
 from fastapi import Cookie, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from .auth import verify_token
 from .database import get_db
-from .models import User, UserRole
+from .models import ApiKey, User, UserRole
+
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 class UnauthenticatedException(HTTPException):
@@ -144,4 +148,72 @@ async def get_optional_user(
         return None
 
     user = db.query(User).filter(User.email == token_data.email).first()
+    return user
+
+
+async def get_api_key_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    """
+    Authenticate a user via API key from the Authorization: Bearer header.
+
+    Args:
+        credentials: Bearer token credentials
+        db: Database session
+
+    Returns:
+        The User associated with the API key
+
+    Raises:
+        HTTPException: 401 if the key is missing or invalid
+    """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing API key",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    key_hash = hashlib.sha256(credentials.credentials.encode()).hexdigest()
+    api_key = db.query(ApiKey).filter(ApiKey.key_hash == key_hash).first()
+
+    if api_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API key",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = db.query(User).filter(User.id == api_key.user_id).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API key owner not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return user
+
+
+async def require_api_admin(
+    user: User = Depends(get_api_key_user),
+) -> User:
+    """
+    Require admin role for API key authenticated requests.
+
+    Args:
+        user: User from get_api_key_user dependency
+
+    Returns:
+        Current User object if admin
+
+    Raises:
+        HTTPException: 403 if user is not an admin
+    """
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required",
+        )
     return user

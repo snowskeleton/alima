@@ -22,20 +22,11 @@
 
     {% if feed.feed_type.value == 'smart' %}
     <div class="form-group">
-        <label class="form-label">Filter By</label>
-        <select name="filter_type" class="form-input">
-            <option value="">All Books (No Filter)</option>
-            <option value="author" {% if feed.filter_criteria and feed.filter_criteria.get('type') == 'author' %}selected{% endif %}>Author</option>
-            <option value="series" {% if feed.filter_criteria and feed.filter_criteria.get('type') == 'series' %}selected{% endif %}>Series</option>
-            <option value="narrator" {% if feed.filter_criteria and feed.filter_criteria.get('type') == 'narrator' %}selected{% endif %}>Narrator</option>
-            <option value="genre" {% if feed.filter_criteria and feed.filter_criteria.get('type') == 'genre' %}selected{% endif %}>Genre</option>
-        </select>
+        <label class="form-label">Filters</label>
+        <div id="filterRows"></div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="addFilterRow()">+ Add Filter</button>
     </div>
-
-    <div class="form-group">
-        <label class="form-label">Filter Value</label>
-        <input type="text" name="filter_value" class="form-input" value="{{ feed.filter_criteria.get('value') if feed.filter_criteria else '' }}" placeholder="e.g. Brandon Sanderson">
-    </div>
+    <input type="hidden" name="filters_json" id="filtersJson">
     {% endif %}
 
     <div class="form-group">
@@ -75,6 +66,25 @@
 .current-cover {
     margin-bottom: 1rem;
 }
+
+.filter-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    align-items: center;
+}
+.filter-row .filter-field { flex: 0 0 140px; }
+.filter-row .filter-operator { flex: 0 0 160px; }
+.filter-row .filter-value { flex: 1; }
+.filter-row .btn { flex-shrink: 0; }
+@media (max-width: 768px) {
+    .filter-row {
+        flex-wrap: wrap;
+    }
+    .filter-row .filter-field,
+    .filter-row .filter-operator { flex: 1 1 45%; }
+    .filter-row .filter-value { flex: 1 1 100%; }
+}
 </style>
 
 <script>
@@ -89,5 +99,72 @@ async function removeFeedCover(feedId) {
 
     window.location.reload();
 }
+
+{% if feed.feed_type.value == 'smart' %}
+const FILTER_FIELDS = [
+    {value: 'author', label: 'Author'},
+    {value: 'title', label: 'Title'},
+    {value: 'series', label: 'Series'},
+    {value: 'narrator', label: 'Narrator'},
+    {value: 'publisher', label: 'Publisher'},
+];
+const FILTER_OPERATORS = [
+    {value: 'contains', label: 'contains'},
+    {value: 'not_contains', label: 'does not contain'},
+    {value: 'is', label: 'is exactly'},
+    {value: 'is_not', label: 'is not'},
+];
+
+function addFilterRow(field, operator, value) {
+    const container = document.getElementById('filterRows');
+    const row = document.createElement('div');
+    row.className = 'filter-row';
+    row.innerHTML = `
+        <select class="form-input filter-field">
+            ${FILTER_FIELDS.map(f => `<option value="${f.value}" ${f.value === (field || '') ? 'selected' : ''}>${f.label}</option>`).join('')}
+        </select>
+        <select class="form-input filter-operator">
+            ${FILTER_OPERATORS.map(o => `<option value="${o.value}" ${o.value === (operator || '') ? 'selected' : ''}>${o.label}</option>`).join('')}
+        </select>
+        <input type="text" class="form-input filter-value" placeholder="e.g. Brandon Sanderson" value="${value || ''}">
+        <button type="button" class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">Remove</button>
+    `;
+    container.appendChild(row);
+}
+
+function collectFilters() {
+    const rows = document.querySelectorAll('.filter-row');
+    const filters = [];
+    rows.forEach(row => {
+        const field = row.querySelector('.filter-field').value;
+        const operator = row.querySelector('.filter-operator').value;
+        const value = row.querySelector('.filter-value').value.trim();
+        if (value) {
+            filters.push({field, operator, value});
+        }
+    });
+    document.getElementById('filtersJson').value = filters.length > 0 ? JSON.stringify(filters) : '';
+}
+
+// Collect filters before form submission
+document.querySelector('form').addEventListener('submit', function() {
+    collectFilters();
+});
+
+// Pre-populate existing filters
+(function() {
+    const criteria = {{ feed.filter_criteria | tojson }};
+    if (!criteria) return;
+
+    let filters = [];
+    if (criteria.filters) {
+        filters = criteria.filters;
+    } else if (criteria.type && criteria.value) {
+        // Legacy format
+        filters = [{field: criteria.type, operator: 'contains', value: criteria.value}];
+    }
+    filters.forEach(f => addFilterRow(f.field, f.operator, f.value));
+})();
+{% endif %}
 </script>
 {% endblock %}

@@ -1,5 +1,7 @@
 """Routes for managing RSS feeds."""
 
+import json
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -73,8 +75,7 @@ async def create_feed(
     name: str = Form(...),
     description: str = Form(None),
     feed_type: str = Form(...),
-    filter_type: str = Form(None),
-    filter_value: str = Form(None),
+    filters_json: str = Form(None),
     is_public: bool = Form(True),
     cover_image: UploadFile = File(None),
     current_user: User = Depends(get_current_active_user),
@@ -88,11 +89,13 @@ async def create_feed(
 
     # Build filter criteria for smart feeds
     filter_criteria = None
-    if feed_type == "smart" and filter_type and filter_value:
-        filter_criteria = {
-            "type": filter_type,
-            "value": filter_value,
-        }
+    if feed_type == "smart" and filters_json:
+        try:
+            parsed = json.loads(filters_json)
+            if isinstance(parsed, list) and len(parsed) > 0:
+                filter_criteria = {"filters": parsed}
+        except (json.JSONDecodeError, TypeError):
+            pass
 
     # Process cover image if provided
     cover_image_path = None
@@ -174,8 +177,7 @@ async def update_feed(
     name: str = Form(...),
     description: str = Form(None),
     is_public: bool = Form(True),
-    filter_type: str = Form(None),
-    filter_value: str = Form(None),
+    filters_json: str = Form(None),
     cover_image: UploadFile = File(None),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -220,13 +222,16 @@ async def update_feed(
 
     # Update filter criteria for smart feeds
     if feed.feed_type == FeedType.SMART:
-        if filter_type and filter_value:
-            feed.filter_criteria = {
-                "type": filter_type,
-                "value": filter_value,
-            }
+        if filters_json:
+            try:
+                parsed = json.loads(filters_json)
+                if isinstance(parsed, list) and len(parsed) > 0:
+                    feed.filter_criteria = {"filters": parsed}
+                else:
+                    feed.filter_criteria = None
+            except (json.JSONDecodeError, TypeError):
+                feed.filter_criteria = None
         else:
-            # Clear filter if no type/value provided
             feed.filter_criteria = None
 
     db.commit()

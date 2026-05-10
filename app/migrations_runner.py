@@ -789,6 +789,74 @@ def run_migration_015_magic_links(db: Session, engine) -> None:
         raise
 
 
+def run_migration_016_create_api_keys(db: Session, engine) -> None:
+    """Create api_keys table."""
+    migration_name = "016_create_api_keys"
+
+    if has_migration_been_applied(db, migration_name):
+        logger.info(f"Migration {migration_name} already applied")
+        return
+
+    is_postgres = "postgresql" in str(engine.url)
+
+    # Check if table already exists
+    table_exists = False
+    if is_postgres:
+        result = db.execute(text("""
+            SELECT table_name FROM information_schema.tables
+            WHERE table_name='api_keys'
+        """))
+        table_exists = result.fetchone() is not None
+    else:
+        result = db.execute(text("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='api_keys'
+        """))
+        table_exists = result.fetchone() is not None
+
+    if table_exists:
+        logger.info("Table api_keys already exists, marking migration as applied")
+        mark_migration_applied(db, migration_name)
+        return
+
+    logger.info(f"Running migration: {migration_name}")
+
+    try:
+        if is_postgres:
+            db.execute(text("""
+                CREATE TABLE api_keys (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    name VARCHAR(255) NOT NULL,
+                    key_prefix VARCHAR(8) NOT NULL,
+                    key_hash VARCHAR(64) NOT NULL UNIQUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+            """))
+            db.execute(text("CREATE INDEX ix_api_keys_key_hash ON api_keys(key_hash)"))
+        else:
+            db.execute(text("""
+                CREATE TABLE api_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    name VARCHAR(255) NOT NULL,
+                    key_prefix VARCHAR(8) NOT NULL,
+                    key_hash VARCHAR(64) NOT NULL UNIQUE,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+            """))
+            db.execute(text("CREATE INDEX ix_api_keys_key_hash ON api_keys(key_hash)"))
+
+        db.commit()
+        mark_migration_applied(db, migration_name)
+        logger.info(f"Migration {migration_name} completed successfully!")
+
+    except Exception as e:
+        logger.error(f"Migration {migration_name} failed: {e}", exc_info=True)
+        db.rollback()
+        raise
+
+
 def run_all_pending_migrations(db: Session) -> None:
     """Run all pending migrations in order."""
     from .database import engine
@@ -808,6 +876,7 @@ def run_all_pending_migrations(db: Session) -> None:
         run_migration_013_add_indexes_and_cascades,
         run_migration_014_add_user_notifications,
         run_migration_015_magic_links,
+        run_migration_016_create_api_keys,
     ]
 
     for migration_func in migrations:

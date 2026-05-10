@@ -272,7 +272,10 @@ app.add_middleware(
     cookie_secure=settings.domain.startswith("https://"),
     cookie_samesite="lax",
     header_name="x-csrf-token",  # Match the header name we're sending from JavaScript
-    exempt_urls=[re.compile(r"^/health$")],  # Health check doesn't need CSRF (regex pattern required)
+    exempt_urls=[
+        re.compile(r"^/health$"),
+        re.compile(r"^/api/v1/"),
+    ],
 )
 
 # Force HTTPS URLs when DOMAIN is set to HTTPS
@@ -343,7 +346,7 @@ async def root(db: Session = Depends(get_db)):
 
 
 # Include routers
-from .routers import accounts, admin, api, auth, books, downloads, feeds, files, import_books, library, logs, match_books, rss
+from .routers import accounts, admin, api, auth, books, downloads, ext_api, feeds, files, import_books, library, logs, match_books, rss
 from .routers import settings as settings_router
 
 app.include_router(auth.router)
@@ -360,4 +363,5 @@ app.include_router(match_books.router)
 app.include_router(rss.router)
 app.include_router(files.router)
 app.include_router(settings_router.router)
+app.include_router(ext_api.router)
 app.include_router(logs.router)

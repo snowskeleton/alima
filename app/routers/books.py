@@ -130,8 +130,28 @@ async def delete_book(
             detail=f"Book with ID {book_id} not found",
         )
 
-    # TODO: Delete associated files (audiobook file, cover image)
-    # This will be implemented when file serving is added
+    # Delete associated files
+    from pathlib import Path
+
+    from ..config import settings
+
+    if book.file_path:
+        file_path = Path(book.file_path)
+        if not file_path.is_absolute():
+            file_path = settings.audiobooks_path.parent / file_path
+        try:
+            file_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    if book.cover_image_path:
+        cover_path = Path(book.cover_image_path)
+        if not cover_path.is_absolute():
+            cover_path = settings.covers_path.parent / cover_path
+        try:
+            cover_path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     db.delete(book)
     db.commit()

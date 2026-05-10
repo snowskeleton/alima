@@ -1,6 +1,8 @@
 """Admin routes for user management."""
 
+import hashlib
 import logging
+import secrets
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
@@ -12,7 +14,7 @@ from ..auth import create_magic_link, create_user
 from ..config import settings
 from ..database import get_db
 from ..dependencies import require_admin
-from ..models import Feed, FeedType, User, UserRole
+from ..models import ApiKey, Feed, FeedType, User, UserRole
 from ..services.email_service import EmailService
 from ..services.settings_service import SettingsService
 from ..utils.tokens import generate_invite_token
@@ -311,3 +313,85 @@ async def force_refresh_metadata(
             "success": False,
             "error": str(e),
         }
+
+
+@router.get("/api-keys", response_class=HTMLResponse)
+async def list_api_keys(
+    request: Request,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """List all API keys for the current admin user."""
+    from ..utils.flash import get_flashed_messages
+
+    api_keys = db.query(ApiKey).filter(ApiKey.user_id == current_user.id).order_by(ApiKey.created_at.desc()).all()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/api_keys.html",
+        context={
+            "current_user": current_user,
+            "api_keys": api_keys,
+            "messages": get_flashed_messages(request),
+        },
+    )
+
+
+@router.post("/api-keys/create")
+async def create_api_key(
+    request: Request,
+    name: str = Form(...),
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Generate a new API key."""
+    raw_key = secrets.token_urlsafe(32)
+    key_prefix = raw_key[:8]
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+
+    api_key = ApiKey(
+        user_id=current_user.id,
+        name=name,
+        key_prefix=key_prefix,
+        key_hash=key_hash,
+    )
+    db.add(api_key)
+    db.commit()
+    db.refresh(api_key)
+
+    logger.info(f"API key created: '{name}' by {current_user.email}")
+
+    return JSONResponse(content={
+        "success": True,
+        "key": raw_key,
+        "key_id": api_key.id,
+        "name": api_key.name,
+        "prefix": key_prefix,
+    })
+
+
+@router.delete("/api-keys/{key_id}")
+async def delete_api_key(
+    key_id: int,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Revoke an API key."""
+    api_key = db.query(ApiKey).filter(
+        ApiKey.id == key_id,
+        ApiKey.user_id == current_user.id,
+    ).first()
+
+    if not api_key:
+        return JSONResponse(
+            status_code=404,
+            content={"success": False, "error": "API key not found"},
+        )
+
+    key_name = api_key.name
+    db.delete(api_key)
+    db.commit()
+
+    logger.info(f"API key revoked: '{key_name}' by {current_user.email}")
+
+    return JSONResponse(content={"success": True, "message": f"API key '{key_name}' revoked"})

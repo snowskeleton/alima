@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import List
 from xml.etree.ElementTree import Element, SubElement, tostring
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -108,28 +109,11 @@ class FeedGeneratorService:
             query = self.db.query(Book).filter(Book.file_path.isnot(None))
 
             if feed.filter_criteria:
-                criteria_type = feed.filter_criteria.get("type")
-
-                if criteria_type == "author":
-                    author_name = feed.filter_criteria.get("value")
-                    query = query.filter(Book.author.ilike(f"%{author_name}%"))
-
-                elif criteria_type == "series":
-                    series_name = feed.filter_criteria.get("value")
-                    query = query.filter(Book.series.ilike(f"%{series_name}%"))
-
-                elif criteria_type == "narrator":
-                    narrator_name = feed.filter_criteria.get("value")
-                    query = query.filter(Book.narrator.ilike(f"%{narrator_name}%"))
-
-                elif criteria_type == "genre":
-                    genre = feed.filter_criteria.get("value")
-                    # JSON query for genres array
-                    query = query.filter(Book.genres.contains([genre]))
-
-                elif criteria_type == "multiple":
-                    # Handle complex filters (future enhancement)
-                    pass
+                filters = self._normalize_filters(feed.filter_criteria)
+                for f in filters:
+                    condition = self._build_filter_condition(f)
+                    if condition is not None:
+                        query = query.filter(condition)
 
             # Order by added date, newest first
             query = query.order_by(Book.added_at.desc())
@@ -137,6 +121,40 @@ class FeedGeneratorService:
             return query.all()
 
         return []
+
+    @staticmethod
+    def _normalize_filters(filter_criteria: dict) -> list:
+        """Convert filter_criteria to a list of filter dicts, handling legacy format."""
+        if "filters" in filter_criteria:
+            return filter_criteria["filters"]
+        # Legacy format: {"type": "author", "value": "X"} -> single contains filter
+        if "type" in filter_criteria and "value" in filter_criteria:
+            return [{"field": filter_criteria["type"], "operator": "contains", "value": filter_criteria["value"]}]
+        return []
+
+    @staticmethod
+    def _build_filter_condition(f: dict):
+        """Build a SQLAlchemy filter condition from a filter dict."""
+        field_name = f.get("field")
+        operator = f.get("operator", "contains")
+        value = f.get("value", "")
+
+        valid_fields = {"title", "author", "series", "narrator", "publisher"}
+        if field_name not in valid_fields:
+            return None
+
+        column = getattr(Book, field_name)
+
+        if operator == "contains":
+            return column.ilike(f"%{value}%")
+        elif operator == "not_contains":
+            return ~column.ilike(f"%{value}%")
+        elif operator == "is":
+            return func.lower(column) == value.lower()
+        elif operator == "is_not":
+            return func.lower(column) != value.lower()
+
+        return None
 
     def _get_feed_cover_url(self, feed: Feed, domain: str) -> str:
         """

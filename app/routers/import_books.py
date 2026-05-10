@@ -88,26 +88,17 @@ async def upload_book(
 
         logger.info("Extracting metadata and importing book...")
 
-        # If manual metadata provided, use it
-        if title and author:
-            metadata = {
-                "title": title,
-                "author": author,
-                "narrator": narrator,
-                "series": series,
-                "series_position": series_position,
-                "description": description,
-                "publisher": publisher,
-            }
-            book = import_service.import_book_with_metadata(temp_file_path, metadata)
-        else:
-            # Otherwise extract from file
-            book = import_service.import_book(
-                temp_file_path,
-                title=title,
-                author=author,
-                extract_metadata=extract_metadata,
-            )
+        book = import_service.import_book(
+            temp_file_path,
+            title=title,
+            author=author,
+            narrator=narrator,
+            series=series,
+            series_position=series_position,
+            description=description,
+            publisher=publisher,
+            extract_metadata=extract_metadata,
+        )
 
         # Clean up temp file
         temp_file_path.unlink()
