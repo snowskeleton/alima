@@ -142,7 +142,7 @@
                     method: 'POST',
                     body: formData,
                 })
-                .then(response => {
+                .then(async response => {
                     if (response.redirected) {
                         // Follow redirects
                         window.location.href = response.url;
@@ -150,13 +150,28 @@
                         // Reload page on success
                         window.location.reload();
                     } else {
-                        // Show error
-                        alert('Request failed: ' + response.statusText);
+                        // Read response body for error details
+                        let errorMsg = `Request failed (${response.status})`;
+                        try {
+                            const body = await response.json();
+                            if (typeof body.detail === 'string') {
+                                errorMsg = body.detail;
+                            } else if (Array.isArray(body.detail)) {
+                                errorMsg = body.detail.map(e => e.msg || JSON.stringify(e)).join('; ');
+                            }
+                        } catch {
+                            // Response wasn't JSON, try text
+                            try {
+                                const text = await response.text();
+                                if (text) errorMsg = text.substring(0, 200);
+                            } catch {}
+                        }
+                        alert(errorMsg);
                     }
                 })
                 .catch(error => {
                     console.error('Form submission error:', error);
-                    alert('Request failed. Please try again.');
+                    alert('Request failed: ' + error.message);
                 });
             });
         });

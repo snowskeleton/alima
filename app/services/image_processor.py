@@ -13,9 +13,6 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-# Maximum file size: 10MB
-MAX_FILE_SIZE = 10 * 1024 * 1024
-
 # Allowed image formats
 ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP", "GIF"}
 
@@ -53,12 +50,6 @@ class ImageProcessorService:
         try:
             # Read file content
             content = await uploaded_file.read()
-
-            # Validate file size
-            if len(content) > MAX_FILE_SIZE:
-                raise ValueError(
-                    f"File too large. Maximum size is {MAX_FILE_SIZE // 1024 // 1024}MB"
-                )
 
             # Open image with Pillow
             try:
