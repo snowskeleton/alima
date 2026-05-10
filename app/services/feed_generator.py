@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import List
 from xml.etree.ElementTree import Element, SubElement, tostring
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -148,11 +148,11 @@ class FeedGeneratorService:
         if operator == "contains":
             return column.ilike(f"%{value}%")
         elif operator == "not_contains":
-            return ~column.ilike(f"%{value}%")
+            return or_(column.is_(None), ~column.ilike(f"%{value}%"))
         elif operator == "is":
             return func.lower(column) == value.lower()
         elif operator == "is_not":
-            return func.lower(column) != value.lower()
+            return or_(column.is_(None), func.lower(column) != value.lower())
 
         return None
 
