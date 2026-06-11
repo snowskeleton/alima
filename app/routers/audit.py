@@ -3,11 +3,12 @@
 import asyncio
 import json
 import logging
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Body, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from rapidfuzz import fuzz
@@ -182,6 +183,86 @@ async def audit_results(
     }
 
     return JSONResponse({"results": items, "summary": summary})
+
+
+def _sanitize_filename(filename: str) -> str:
+    """Sanitize filename for filesystem use (matches download service logic)."""
+    invalid_chars = '<>:"/\\|?*'
+    for char in invalid_chars:
+        filename = filename.replace(char, "_")
+    max_length = 200
+    if len(filename) > max_length:
+        filename = filename[:max_length]
+    return filename.strip()
+
+
+@router.post("/audit/unmatch")
+async def audit_unmatch(
+    file_path: str = Body(..., embed=True),
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Unmatch a file from its book and rename it based on embedded metadata."""
+    # Find the book with this file_path
+    book = db.query(Book).filter(Book.file_path == file_path).first()
+    if not book:
+        return JSONResponse({"error": "No book found with that file path"}, status_code=404)
+
+    # Resolve the full path on disk
+    full_path = Path(file_path)
+    if not full_path.is_absolute():
+        full_path = settings.audiobooks_path.parent / full_path
+
+    old_title = book.title
+
+    # Clear file association from the book
+    book.file_path = None
+    book.file_size = None
+    book.downloaded_at = None
+
+    new_path_str = None
+
+    if full_path.exists():
+        # Read embedded metadata to determine the correct filename
+        metadata = MetadataService.read_metadata(full_path)
+        file_title = metadata.get("title") or ""
+
+        # Strip common suffixes like "(Unabridged)" from the embedded title
+        # to get a clean filename
+        import re
+        clean_title = re.sub(r"\s*\(Unabridged\)\s*$", "", file_title, flags=re.IGNORECASE).strip()
+
+        if clean_title:
+            ext = full_path.suffix  # preserve original extension
+            safe_title = _sanitize_filename(clean_title)
+            new_filename = f"{safe_title}{ext}"
+            new_path = settings.audiobooks_path / new_filename
+
+            # Handle duplicate filenames
+            counter = 1
+            while new_path.exists() and new_path != full_path:
+                new_filename = f"{safe_title}_{counter}{ext}"
+                new_path = settings.audiobooks_path / new_filename
+                counter += 1
+
+            if new_path != full_path:
+                shutil.move(str(full_path), str(new_path))
+                new_path_str = str(new_path.relative_to(settings.audiobooks_path.parent))
+                logger.info(f"Renamed '{full_path.name}' -> '{new_path.name}'")
+            else:
+                new_path_str = file_path
+                logger.info(f"File already has correct name: {full_path.name}")
+        else:
+            new_path_str = file_path
+            logger.warning(f"No embedded title found, file not renamed: {full_path.name}")
+
+    db.commit()
+
+    return JSONResponse({
+        "success": True,
+        "old_title": old_title,
+        "new_file_path": new_path_str,
+    })
 
 
 def _run_audit(audit_run_id: int):

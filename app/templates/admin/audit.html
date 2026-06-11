@@ -66,6 +66,7 @@
                     <th>Author (File)</th>
                     <th>Author Match</th>
                     <th>File Path</th>
+                    <th>Action</th>
                 </tr>
             </thead>
             <tbody id="results-tbody">
@@ -240,6 +241,29 @@
 .text-muted {
     color: var(--secondary-color);
 }
+
+.btn-sm {
+    padding: 0.3rem 0.75rem;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+.btn-danger {
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 0.375rem;
+    cursor: pointer;
+}
+
+.btn-danger:hover {
+    background: #c82333;
+}
+
+.btn-danger:disabled {
+    background: #999;
+    cursor: not-allowed;
+}
 </style>
 
 <script>
@@ -391,14 +415,15 @@ function renderResults() {
     const filtered = showAll ? allResults : allResults.filter(r => r.status !== 'good');
 
     if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-muted" style="text-align:center;padding:2rem;">No mismatches found. All files match their database records.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="text-muted" style="text-align:center;padding:2rem;">No mismatches found. All files match their database records.</td></tr>';
         return;
     }
 
     let html = '';
     for (const r of filtered) {
         const authorScoreClass = r.author_score >= 70 ? 'good' : (r.author_score >= 50 ? 'warning' : 'bad');
-        html += '<tr class="audit-row audit-' + escapeAttr(r.status) + '">';
+        const rowId = 'row-' + btoa(r.file_path).replace(/[^a-zA-Z0-9]/g, '');
+        html += '<tr class="audit-row audit-' + escapeAttr(r.status) + '" id="' + rowId + '">';
         html += '<td>' + escapeHtml(r.book_title) + '</td>';
 
         if (r.status === 'missing') {
@@ -426,9 +451,58 @@ function renderResults() {
         }
 
         html += '<td><code>' + escapeHtml(r.file_path) + '</code></td>';
+
+        // Action column
+        if (r.status === 'bad' || r.status === 'warning') {
+            html += '<td><button class="btn btn-sm btn-danger" onclick="unmatchBook(\'' + escapeJs(r.file_path) + '\', this)">Unmatch &amp; Rename</button></td>';
+        } else {
+            html += '<td></td>';
+        }
+
         html += '</tr>';
     }
     tbody.innerHTML = html;
+}
+
+function unmatchBook(filePath, btn) {
+    if (!confirm('Unmatch this file from its book and rename it based on embedded metadata?')) {
+        return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'Working...';
+
+    fetchWithCsrf('/admin/audit/unmatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_path: filePath }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+            btn.disabled = false;
+            btn.textContent = 'Unmatch & Rename';
+            return;
+        }
+        // Update the row to show success
+        btn.textContent = 'Done';
+        btn.classList.remove('btn-danger');
+        btn.classList.add('btn-secondary');
+
+        // Update the file path in the row if it was renamed
+        if (data.new_file_path) {
+            const row = btn.closest('tr');
+            const pathCell = row.querySelectorAll('td')[6];
+            if (pathCell) {
+                pathCell.innerHTML = '<code>' + escapeHtml(data.new_file_path) + '</code>';
+            }
+        }
+    })
+    .catch(err => {
+        alert('Request failed: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Unmatch & Rename';
+    });
 }
 
 function escapeHtml(text) {
@@ -441,6 +515,11 @@ function escapeHtml(text) {
 function escapeAttr(text) {
     if (!text) return '';
     return text.replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
+function escapeJs(text) {
+    if (!text) return '';
+    return text.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 </script>
 {% endblock %}
