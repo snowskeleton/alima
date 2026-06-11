@@ -8,41 +8,53 @@
     <p>Detect mismatches between audiobook file metadata and database records</p>
 </div>
 
-<div class="audit-actions">
-    <a href="/admin/audit?run=true" class="btn btn-primary">Run Audit</a>
-    {% if run and results is not none %}
-        {% if show_all %}
-        <a href="/admin/audit?run=true" class="btn btn-secondary">Show Mismatches Only</a>
-        {% else %}
-        <a href="/admin/audit?run=true&show_all=true" class="btn btn-secondary">Show All Results</a>
-        {% endif %}
+<div class="audit-actions" id="audit-actions">
+    <button id="btn-run-audit" class="btn btn-primary" onclick="startAudit()">Run Audit</button>
+    {% if last_run_id %}
+    <button id="btn-last-results" class="btn btn-secondary" onclick="loadResults({{ last_run_id }})">View Last Results</button>
     {% endif %}
 </div>
 
-{% if run and summary %}
-<!-- Summary Stats -->
-<div class="stats-grid">
-    <div class="stat-card">
-        <div class="stat-label">Files Scanned</div>
-        <div class="stat-value">{{ summary.total_scanned }}</div>
-    </div>
-    <div class="stat-card stat-success">
-        <div class="stat-label">Good Matches</div>
-        <div class="stat-value">{{ summary.good }}</div>
-    </div>
-    <div class="stat-card stat-error">
-        <div class="stat-label">Mismatches</div>
-        <div class="stat-value">{{ summary.mismatches }}</div>
-    </div>
-    <div class="stat-card stat-warning">
-        <div class="stat-label">Files Missing</div>
-        <div class="stat-value">{{ summary.missing_files }}</div>
+<!-- Progress Section (hidden until audit starts) -->
+<div id="progress-section" style="display: none;">
+    <div class="progress-container">
+        <div class="progress-header">
+            <span id="progress-label">Scanning...</span>
+            <span id="progress-count">0 / 0</span>
+        </div>
+        <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="progress-bar" style="width: 0%"></div>
+        </div>
     </div>
 </div>
 
-<!-- Results Table -->
-{% if results %}
-<div class="audit-results">
+<!-- Summary Stats (hidden until results loaded) -->
+<div class="stats-grid" id="summary-section" style="display: none;">
+    <div class="stat-card">
+        <div class="stat-label">Files Scanned</div>
+        <div class="stat-value" id="stat-scanned">0</div>
+    </div>
+    <div class="stat-card stat-success">
+        <div class="stat-label">Good Matches</div>
+        <div class="stat-value" id="stat-good">0</div>
+    </div>
+    <div class="stat-card stat-error">
+        <div class="stat-label">Mismatches</div>
+        <div class="stat-value" id="stat-mismatches">0</div>
+    </div>
+    <div class="stat-card stat-warning">
+        <div class="stat-label">Files Missing</div>
+        <div class="stat-value" id="stat-missing">0</div>
+    </div>
+</div>
+
+<!-- Filter Toggle (hidden until results loaded) -->
+<div id="filter-section" style="display: none;" class="audit-actions">
+    <button id="btn-show-mismatches" class="btn btn-secondary" onclick="toggleFilter()">Show All Results</button>
+</div>
+
+<!-- Results Table (hidden until results loaded) -->
+<div class="audit-results" id="results-section" style="display: none;">
     <div class="table-container">
         <table class="data-table">
             <thead>
@@ -56,61 +68,16 @@
                     <th>File Path</th>
                 </tr>
             </thead>
-            <tbody>
-                {% for r in results %}
-                <tr class="audit-row audit-{{ r.status }}">
-                    <td>{{ r.book_title }}</td>
-                    <td>
-                        {% if r.status == 'missing' %}
-                            <em class="text-muted">File missing</em>
-                        {% elif r.file_title %}
-                            {{ r.file_title }}
-                        {% else %}
-                            <em class="text-muted">No metadata</em>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if r.status == 'missing' %}
-                            -
-                        {% else %}
-                            <span class="match-score score-{{ r.status }}">{{ r.title_score }}%</span>
-                        {% endif %}
-                    </td>
-                    <td>{{ r.book_author }}</td>
-                    <td>
-                        {% if r.status == 'missing' %}
-                            <em class="text-muted">-</em>
-                        {% elif r.file_author %}
-                            {{ r.file_author }}
-                        {% else %}
-                            <em class="text-muted">No metadata</em>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if r.status == 'missing' %}
-                            -
-                        {% else %}
-                            <span class="match-score score-{% if r.author_score >= 70 %}good{% elif r.author_score >= 50 %}warning{% else %}bad{% endif %}">{{ r.author_score }}%</span>
-                        {% endif %}
-                    </td>
-                    <td><code>{{ r.file_path }}</code></td>
-                </tr>
-                {% endfor %}
+            <tbody id="results-tbody">
             </tbody>
         </table>
     </div>
 </div>
-{% elif not show_all %}
-<div class="audit-results">
-    <p class="text-muted">No mismatches found. All files match their database records.</p>
-</div>
-{% endif %}
 
-{% elif not run %}
-<div class="audit-results">
+<!-- Empty state -->
+<div class="audit-results" id="empty-state">
     <p class="text-muted">Click "Run Audit" to scan your library for metadata mismatches.</p>
 </div>
-{% endif %}
 
 <style>
 .page-header {
@@ -121,6 +88,35 @@
     display: flex;
     gap: 0.75rem;
     margin-bottom: 2rem;
+}
+
+.progress-container {
+    background: white;
+    padding: 1.5rem 2rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    margin-bottom: 2rem;
+}
+
+.progress-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    font-weight: 500;
+}
+
+.progress-bar-track {
+    background: #e5e7eb;
+    border-radius: 0.5rem;
+    height: 1.25rem;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    background: #3b82f6;
+    height: 100%;
+    border-radius: 0.5rem;
+    transition: width 0.3s ease;
 }
 
 .stats-grid {
@@ -245,4 +241,206 @@
     color: var(--secondary-color);
 }
 </style>
+
+<script>
+let allResults = [];
+let showAll = false;
+let currentAuditId = null;
+let eventSource = null;
+
+// On page load, reconnect to a running audit if one exists
+document.addEventListener('DOMContentLoaded', function() {
+    const runningId = {{ running_run_id|default('null') }};
+    if (runningId) {
+        currentAuditId = runningId;
+        connectToStream(runningId);
+    }
+});
+
+function startAudit() {
+    const btn = document.getElementById('btn-run-audit');
+    btn.disabled = true;
+    btn.textContent = 'Starting...';
+
+    document.getElementById('empty-state').style.display = 'none';
+    document.getElementById('summary-section').style.display = 'none';
+    document.getElementById('filter-section').style.display = 'none';
+    document.getElementById('results-section').style.display = 'none';
+
+    fetchWithCsrf('/admin/audit/start', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            currentAuditId = data.audit_id;
+            connectToStream(data.audit_id);
+        })
+        .catch(err => {
+            console.error('Failed to start audit:', err);
+            alert('Failed to start audit: ' + err.message);
+            btn.disabled = false;
+            btn.textContent = 'Run Audit';
+        });
+}
+
+function connectToStream(auditId) {
+    const btn = document.getElementById('btn-run-audit');
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+
+    document.getElementById('empty-state').style.display = 'none';
+    document.getElementById('progress-section').style.display = 'block';
+
+    if (eventSource) {
+        eventSource.close();
+    }
+
+    eventSource = new EventSource('/admin/audit/stream/' + auditId);
+
+    eventSource.addEventListener('audit_progress', function(e) {
+        const data = JSON.parse(e.data);
+        updateProgress(data);
+
+        if (data.status === 'completed') {
+            eventSource.close();
+            eventSource = null;
+            onAuditComplete(auditId);
+        } else if (data.status === 'failed') {
+            eventSource.close();
+            eventSource = null;
+            onAuditFailed(data.error || 'Unknown error');
+        }
+    });
+
+    eventSource.addEventListener('error', function() {
+        // SSE connection closed by server (normal after completed/failed)
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
+    });
+}
+
+function updateProgress(data) {
+    const pct = data.total > 0 ? Math.round((data.progress / data.total) * 100) : 0;
+    document.getElementById('progress-bar').style.width = pct + '%';
+    document.getElementById('progress-count').textContent = data.progress + ' / ' + data.total;
+    document.getElementById('progress-label').textContent = 'Scanning... (' + pct + '%)';
+}
+
+function onAuditComplete(auditId) {
+    document.getElementById('progress-label').textContent = 'Complete!';
+    document.getElementById('progress-bar').style.width = '100%';
+
+    const btn = document.getElementById('btn-run-audit');
+    btn.disabled = false;
+    btn.textContent = 'Run Audit';
+
+    loadResults(auditId);
+}
+
+function onAuditFailed(error) {
+    document.getElementById('progress-label').textContent = 'Failed: ' + error;
+    document.getElementById('progress-bar').style.width = '100%';
+    document.getElementById('progress-bar').style.background = '#dc3545';
+
+    const btn = document.getElementById('btn-run-audit');
+    btn.disabled = false;
+    btn.textContent = 'Run Audit';
+}
+
+function loadResults(auditId) {
+    currentAuditId = auditId;
+    document.getElementById('empty-state').style.display = 'none';
+
+    fetch('/admin/audit/results/' + auditId)
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                alert(data.error);
+                return;
+            }
+            allResults = data.results;
+            renderSummary(data.summary);
+            showAll = false;
+            renderResults();
+            document.getElementById('summary-section').style.display = 'grid';
+            document.getElementById('filter-section').style.display = 'flex';
+            document.getElementById('results-section').style.display = 'block';
+        })
+        .catch(err => {
+            console.error('Failed to load results:', err);
+            alert('Failed to load results: ' + err.message);
+        });
+}
+
+function renderSummary(summary) {
+    document.getElementById('stat-scanned').textContent = summary.total_scanned;
+    document.getElementById('stat-good').textContent = summary.good;
+    document.getElementById('stat-mismatches').textContent = summary.mismatches;
+    document.getElementById('stat-missing').textContent = summary.missing_files;
+}
+
+function toggleFilter() {
+    showAll = !showAll;
+    document.getElementById('btn-show-mismatches').textContent =
+        showAll ? 'Show Mismatches Only' : 'Show All Results';
+    renderResults();
+}
+
+function renderResults() {
+    const tbody = document.getElementById('results-tbody');
+    const filtered = showAll ? allResults : allResults.filter(r => r.status !== 'good');
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-muted" style="text-align:center;padding:2rem;">No mismatches found. All files match their database records.</td></tr>';
+        return;
+    }
+
+    let html = '';
+    for (const r of filtered) {
+        const authorScoreClass = r.author_score >= 70 ? 'good' : (r.author_score >= 50 ? 'warning' : 'bad');
+        html += '<tr class="audit-row audit-' + escapeAttr(r.status) + '">';
+        html += '<td>' + escapeHtml(r.book_title) + '</td>';
+
+        if (r.status === 'missing') {
+            html += '<td><em class="text-muted">File missing</em></td>';
+            html += '<td>-</td>';
+        } else if (r.file_title) {
+            html += '<td>' + escapeHtml(r.file_title) + '</td>';
+            html += '<td><span class="match-score score-' + escapeAttr(r.status) + '">' + r.title_score + '%</span></td>';
+        } else {
+            html += '<td><em class="text-muted">No metadata</em></td>';
+            html += '<td><span class="match-score score-' + escapeAttr(r.status) + '">' + r.title_score + '%</span></td>';
+        }
+
+        html += '<td>' + escapeHtml(r.book_author) + '</td>';
+
+        if (r.status === 'missing') {
+            html += '<td><em class="text-muted">-</em></td>';
+            html += '<td>-</td>';
+        } else if (r.file_author) {
+            html += '<td>' + escapeHtml(r.file_author) + '</td>';
+            html += '<td><span class="match-score score-' + escapeAttr(authorScoreClass) + '">' + r.author_score + '%</span></td>';
+        } else {
+            html += '<td><em class="text-muted">No metadata</em></td>';
+            html += '<td><span class="match-score score-' + escapeAttr(authorScoreClass) + '">' + r.author_score + '%</span></td>';
+        }
+
+        html += '<td><code>' + escapeHtml(r.file_path) + '</code></td>';
+        html += '</tr>';
+    }
+    tbody.innerHTML = html;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function escapeAttr(text) {
+    if (!text) return '';
+    return text.replace(/[^a-zA-Z0-9_-]/g, '');
+}
+</script>
 {% endblock %}

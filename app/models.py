@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -101,6 +102,14 @@ class SyncStatus(str, PyEnum):
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class AuditStatus(str, PyEnum):
+    """Library audit run status enumeration."""
+
+    SCANNING = "scanning"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -397,3 +406,47 @@ class ServerSettings(Base):
     updated_by: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=True
     )
+
+
+class AuditRun(Base):
+    """Library audit run tracking model."""
+
+    __tablename__ = "audit_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    status: Mapped[AuditStatus] = mapped_column(
+        Enum(AuditStatus), default=AuditStatus.SCANNING
+    )
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    mismatches: Mapped[int] = mapped_column(Integer, default=0)
+    missing_files: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    results: Mapped[list["AuditResult"]] = relationship(
+        "AuditResult", back_populates="audit_run", cascade="all, delete-orphan"
+    )
+
+
+class AuditResult(Base):
+    """Individual book result from a library audit run."""
+
+    __tablename__ = "audit_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    audit_run_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("audit_runs.id", ondelete="CASCADE"), index=True
+    )
+    book_title: Mapped[str] = mapped_column(String(512))
+    book_author: Mapped[str] = mapped_column(String(512))
+    file_title: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    file_author: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    title_score: Mapped[float] = mapped_column(Float, default=0.0)
+    author_score: Mapped[float] = mapped_column(Float, default=0.0)
+    file_path: Mapped[str] = mapped_column(String(512))
+    status: Mapped[str] = mapped_column(String(20))
+
+    # Relationships
+    audit_run: Mapped["AuditRun"] = relationship("AuditRun", back_populates="results")
