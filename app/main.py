@@ -346,7 +346,7 @@ async def root(db: Session = Depends(get_db)):
 
 
 # Include routers
-from .routers import accounts, admin, api, auth, books, downloads, ext_api, feeds, files, import_books, library, logs, match_books, rss
+from .routers import accounts, admin, api, audit, auth, books, downloads, ext_api, feeds, files, import_books, library, logs, match_books, rss
 from .routers import settings as settings_router
 
 app.include_router(auth.router)
@@ -365,3 +365,4 @@ app.include_router(files.router)
 app.include_router(settings_router.router)
 app.include_router(ext_api.router)
 app.include_router(logs.router)
+app.include_router(audit.router)

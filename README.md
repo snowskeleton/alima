@@ -290,10 +290,13 @@ That's it! The middleware automatically detects HTTPS from your domain setting.
 
 ```bash
 source .venv/bin/activate
+npm run build                # Build frontend assets (needed after JS/CSS changes)
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 The `--reload` flag enables auto-restart when code changes.
+
+**Note**: The `.env` file is configured for local development with SQLite. To test with Docker (which uses PostgreSQL), use `docker compose --env-file .env.docker up --build`.
 
 ### Running Tests
 

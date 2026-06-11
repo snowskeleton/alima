@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+
+{% block title %}Library Audit - Alima{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Library Audit</h1>
+    <p>Detect mismatches between audiobook file metadata and database records</p>
+</div>
+
+<div class="audit-actions">
+    <a href="/admin/audit?run=true" class="btn btn-primary">Run Audit</a>
+    {% if run and results is not none %}
+        {% if show_all %}
+        <a href="/admin/audit?run=true" class="btn btn-secondary">Show Mismatches Only</a>
+        {% else %}
+        <a href="/admin/audit?run=true&show_all=true" class="btn btn-secondary">Show All Results</a>
+        {% endif %}
+    {% endif %}
+</div>
+
+{% if run and summary %}
+<!-- Summary Stats -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">Files Scanned</div>
+        <div class="stat-value">{{ summary.total_scanned }}</div>
+    </div>
+    <div class="stat-card stat-success">
+        <div class="stat-label">Good Matches</div>
+        <div class="stat-value">{{ summary.good }}</div>
+    </div>
+    <div class="stat-card stat-error">
+        <div class="stat-label">Mismatches</div>
+        <div class="stat-value">{{ summary.mismatches }}</div>
+    </div>
+    <div class="stat-card stat-warning">
+        <div class="stat-label">Files Missing</div>
+        <div class="stat-value">{{ summary.missing_files }}</div>
+    </div>
+</div>
+
+<!-- Results Table -->
+{% if results %}
+<div class="audit-results">
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Book Title (DB)</th>
+                    <th>File Title (Embedded)</th>
+                    <th>Title Match</th>
+                    <th>Author (DB)</th>
+                    <th>Author (File)</th>
+                    <th>Author Match</th>
+                    <th>File Path</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in results %}
+                <tr class="audit-row audit-{{ r.status }}">
+                    <td>{{ r.book_title }}</td>
+                    <td>
+                        {% if r.status == 'missing' %}
+                            <em class="text-muted">File missing</em>
+                        {% elif r.file_title %}
+                            {{ r.file_title }}
+                        {% else %}
+                            <em class="text-muted">No metadata</em>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.status == 'missing' %}
+                            -
+                        {% else %}
+                            <span class="match-score score-{{ r.status }}">{{ r.title_score }}%</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.book_author }}</td>
+                    <td>
+                        {% if r.status == 'missing' %}
+                            <em class="text-muted">-</em>
+                        {% elif r.file_author %}
+                            {{ r.file_author }}
+                        {% else %}
+                            <em class="text-muted">No metadata</em>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.status == 'missing' %}
+                            -
+                        {% else %}
+                            <span class="match-score score-{% if r.author_score >= 70 %}good{% elif r.author_score >= 50 %}warning{% else %}bad{% endif %}">{{ r.author_score }}%</span>
+                        {% endif %}
+                    </td>
+                    <td><code>{{ r.file_path }}</code></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% elif not show_all %}
+<div class="audit-results">
+    <p class="text-muted">No mismatches found. All files match their database records.</p>
+</div>
+{% endif %}
+
+{% elif not run %}
+<div class="audit-results">
+    <p class="text-muted">Click "Run Audit" to scan your library for metadata mismatches.</p>
+</div>
+{% endif %}
+
+<style>
+.page-header {
+    margin-bottom: 2rem;
+}
+
+.audit-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 2rem;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: #f9fafb;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    text-align: center;
+}
+
+.stat-card.stat-success {
+    background: #d4edda;
+    border-color: #28a745;
+}
+
+.stat-card.stat-error {
+    background: #f8d7da;
+    border-color: #dc3545;
+}
+
+.stat-card.stat-warning {
+    background: #fff3cd;
+    border-color: #ffc107;
+}
+
+.stat-label {
+    font-size: 0.875rem;
+    color: var(--secondary-color);
+    margin-bottom: 0.5rem;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-color);
+}
+
+.audit-results {
+    background: white;
+    padding: 2rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.table-container {
+    overflow-x: auto;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.data-table th {
+    font-weight: 600;
+    background: #f9fafb;
+    position: sticky;
+    top: 0;
+}
+
+.data-table code {
+    background: #f3f4f6;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.8rem;
+    word-break: break-all;
+}
+
+.audit-row.audit-bad {
+    background: #fff5f5;
+}
+
+.audit-row.audit-warning {
+    background: #fffbeb;
+}
+
+.audit-row.audit-good {
+    background: #f0fdf4;
+}
+
+.audit-row.audit-missing {
+    background: #fef3c7;
+}
+
+.match-score {
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+}
+
+.score-good {
+    color: #166534;
+    background: #dcfce7;
+}
+
+.score-warning {
+    color: #854d0e;
+    background: #fef9c3;
+}
+
+.score-bad {
+    color: #991b1b;
+    background: #fee2e2;
+}
+
+.text-muted {
+    color: var(--secondary-color);
+}
+</style>
+{% endblock %}
