@@ -210,6 +210,8 @@ def _run_audit(audit_run_id: int):
                 file_path = settings.audiobooks_path.parent / file_path
 
             db_title = book.title or ""
+            if book.subtitle:
+                db_title = f"{db_title}: {book.subtitle}"
             db_author = book.author or ""
 
             if not file_path.exists():
@@ -232,12 +234,12 @@ def _run_audit(audit_run_id: int):
                 file_author = metadata.get("author") or ""
 
                 title_score = (
-                    fuzz.ratio(db_title.lower(), file_title.lower())
+                    fuzz.partial_ratio(db_title.lower(), file_title.lower())
                     if db_title and file_title
                     else 0
                 )
                 author_score = (
-                    fuzz.ratio(db_author.lower(), file_author.lower())
+                    fuzz.partial_ratio(db_author.lower(), file_author.lower())
                     if db_author and file_author
                     else 0
                 )
