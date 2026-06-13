@@ -45,7 +45,7 @@ export function LibraryPage() {
     }
   }, [view]);
 
-  if (isLoading) return <PageSpinner />;
+  if (isLoading && !data) return <PageSpinner />;
 
   const books = data?.books ?? [];
   const total = data?.total ?? 0;

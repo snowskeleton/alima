@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { apiFetch } from '../client';
 import type { Book, BooksResponse } from '../types';
 
@@ -28,6 +28,7 @@ export function useBooks(filters: BookFilters = {}) {
   return useQuery<BooksResponse>({
     queryKey: ['books', qs],
     queryFn: () => apiFetch(`/books?${qs}`),
+    placeholderData: keepPreviousData,
   });
 }
 
