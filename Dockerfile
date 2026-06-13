@@ -23,8 +23,14 @@ RUN npm install
 COPY app/ ./app/
 COPY cli.py .
 
-# Build frontend bundles
+# Build legacy frontend bundles
 RUN npm run build
+
+# Build React SPA frontend
+COPY frontend/package.json frontend/package-lock.json* ./frontend/
+RUN cd frontend && npm ci
+COPY frontend/ ./frontend/
+RUN cd frontend && npm run build && cp -r dist/ ../app/static/spa/
 
 # Create data directories
 RUN mkdir -p /app/data/audiobooks/unassigned \

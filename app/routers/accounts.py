@@ -370,8 +370,9 @@ async def trigger_sync(
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Manually trigger a library sync for this account."""
+    """Manually trigger a library sync for this account in the background."""
     from ..services.audible_sync import AudibleSyncService
+    from ..services.background_jobs import BackgroundJobService
 
     account = db.query(AudibleAccount).filter(AudibleAccount.id == account_id).first()
     if not account:
@@ -386,26 +387,16 @@ async def trigger_sync(
             detail=f"Account '{account.username}' is disabled",
         )
 
-    # Trigger sync
-    try:
-        sync_service = AudibleSyncService(db)
-        stats = sync_service.sync_account(account)
+    def _sync_job(job_db, job):
+        sync_service = AudibleSyncService(job_db)
+        acct = job_db.query(AudibleAccount).filter(AudibleAccount.id == account_id).first()
+        stats = sync_service.sync_account(acct)
+        return stats
 
-        # Show results page
-        return templates.TemplateResponse(
-            request=request,
-            name="admin/sync_result.html",
-            context={
-                "current_user": current_user,
-                "account": account,
-                "stats": stats,
-            },
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Sync failed: {str(e)}",
-        )
+    job = BackgroundJobService.create_job(db, "sync", meta={"account_id": account_id})
+    BackgroundJobService.submit(job.id, _sync_job)
+
+    return RedirectResponse(url="/admin/accounts", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/{account_id}/queue-all", response_class=HTMLResponse)

@@ -48,8 +48,10 @@ async def upload_book(
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Upload and import a third-party audiobook with progress tracking."""
+    """Upload and import a third-party audiobook in the background."""
     import logging
+
+    from ..services.background_jobs import BackgroundJobService
 
     logger = logging.getLogger(__name__)
 
@@ -69,25 +71,21 @@ async def upload_book(
             detail=f"Unsupported file format: {file_ext}. Supported: {', '.join(valid_formats)}",
         )
 
-    # Save uploaded file temporarily (FastAPI already buffered it in memory/temp)
+    # Save uploaded file to temp (must finish before background job starts)
     settings.temp_path.mkdir(parents=True, exist_ok=True)
     temp_file_path = settings.temp_path / filename
 
     logger.info(f"Starting upload of {filename}")
 
-    try:
-        # Write uploaded file to temp location
-        with open(temp_file_path, "wb") as f:
-            content = await audio_file.read()
-            f.write(content)
+    with open(temp_file_path, "wb") as f:
+        content = await audio_file.read()
+        f.write(content)
 
-        logger.info(f"Upload complete, file size: {temp_file_path.stat().st_size} bytes")
+    logger.info(f"Upload complete, file size: {temp_file_path.stat().st_size} bytes")
 
-        # Import the book
-        import_service = BookImportService(db)
-
-        logger.info("Extracting metadata and importing book...")
-
+    # Submit import to background
+    def _import_job(job_db, job):
+        import_service = BookImportService(job_db)
         book = import_service.import_book(
             temp_file_path,
             title=title,
@@ -99,34 +97,24 @@ async def upload_book(
             publisher=publisher,
             extract_metadata=extract_metadata,
         )
-
         # Clean up temp file
-        temp_file_path.unlink()
-
-        logger.info(f"Successfully imported book: {book.title} (ID: {book.id})")
-
-        # Return JSON response for Uppy uploads
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "success": True,
-                "book_id": book.id,
-                "redirect_url": f"/library/{book.id}",
-                "message": f"Successfully imported {book.title}"
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"Error importing book: {e}", exc_info=True)
-
-        # Clean up temp file on error
         if temp_file_path.exists():
             temp_file_path.unlink()
+        return {"book_id": book.id, "title": book.title}
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error importing book: {str(e)}",
-        )
+    job = BackgroundJobService.create_job(
+        db, "import", meta={"filename": filename}
+    )
+    BackgroundJobService.submit(job.id, _import_job)
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "success": True,
+            "job_id": job.id,
+            "message": f"Import started for {filename}",
+        },
+    )
 
 
 @router.post("/update-metadata/{book_id}")

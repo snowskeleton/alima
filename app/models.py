@@ -106,6 +106,15 @@ class SyncStatus(str, PyEnum):
     FAILED = "failed"
 
 
+class JobStatus(str, PyEnum):
+    """Background job status enumeration."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class AuditStatus(str, PyEnum):
     """Library audit run status enumeration."""
 
@@ -450,3 +459,22 @@ class AuditResult(Base):
 
     # Relationships
     audit_run: Mapped["AuditRun"] = relationship("AuditRun", back_populates="results")
+
+
+class BackgroundJob(Base):
+    """Background job tracking model for non-blocking operations."""
+
+    __tablename__ = "background_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_type: Mapped[str] = mapped_column(String(50), index=True)
+    status: Mapped[JobStatus] = mapped_column(
+        Enum(JobStatus), default=JobStatus.PENDING, index=True
+    )
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    result: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

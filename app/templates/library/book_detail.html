@@ -5,7 +5,7 @@
 
 {% block content %}
 <div class="breadcrumb">
-    <a href="/library">← Back to Library</a>
+    <a href="/library" onclick="if (document.referrer && new URL(document.referrer).pathname === '/library') { history.back(); return false; }">← Back to Library</a>
 </div>
 
 <div class="book-detail">

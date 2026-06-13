@@ -275,6 +275,7 @@ app.add_middleware(
     exempt_urls=[
         re.compile(r"^/health$"),
         re.compile(r"^/api/v1/"),
+        re.compile(r"^/api/v2/"),
     ],
 )
 
@@ -348,6 +349,7 @@ async def root(db: Session = Depends(get_db)):
 # Include routers
 from .routers import accounts, admin, api, audit, auth, books, downloads, ext_api, feeds, files, import_books, library, logs, match_books, rss
 from .routers import settings as settings_router
+from .routers.api_v2 import router as api_v2_router
 
 app.include_router(auth.router)
 app.include_router(accounts.router)
@@ -366,3 +368,18 @@ app.include_router(settings_router.router)
 app.include_router(ext_api.router)
 app.include_router(logs.router)
 app.include_router(audit.router)
+app.include_router(api_v2_router)
+
+# SPA catch-all: serve index.html for client-side routing
+# Only activates when the SPA has been built
+_spa_index = Path("app/static/spa/index.html")
+if _spa_index.exists():
+    app.mount("/assets", StaticFiles(directory="app/static/spa/assets"), name="spa-assets")
+
+    @app.get("/{full_path:path}", tags=["SPA"])
+    async def spa_catch_all(request: Request, full_path: str):
+        """Serve React SPA for all unmatched routes."""
+        # Don't catch API, files, static, feed XML, health, or auth routes
+        # that are already handled by other routers
+        from starlette.responses import FileResponse
+        return FileResponse("app/static/spa/index.html")

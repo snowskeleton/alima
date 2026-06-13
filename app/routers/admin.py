@@ -296,23 +296,23 @@ async def force_refresh_metadata(
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Force refresh all book metadata from Audible."""
+    """Force refresh all book metadata from Audible in the background."""
     from ..services.audible_sync import AudibleSyncService
+    from ..services.background_jobs import BackgroundJobService
 
-    try:
-        sync_service = AudibleSyncService(db)
+    def _refresh_job(job_db, job):
+        sync_service = AudibleSyncService(job_db)
         stats = sync_service.force_refresh_all_metadata()
+        return stats
 
-        return {
-            "success": True,
-            "message": "Metadata refresh completed",
-            "stats": stats,
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-        }
+    job = BackgroundJobService.create_job(db, "metadata_refresh")
+    BackgroundJobService.submit(job.id, _refresh_job)
+
+    return {
+        "success": True,
+        "message": "Metadata refresh started in background",
+        "job_id": job.id,
+    }
 
 
 @router.get("/api-keys", response_class=HTMLResponse)

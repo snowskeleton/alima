@@ -134,7 +134,7 @@ async def retry_download(
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Retry a failed download."""
+    """Retry a failed download by resetting to PENDING. Scheduler picks it up."""
     queue_entry = db.query(DownloadQueue).filter(DownloadQueue.id == queue_id).first()
     if not queue_entry:
         raise HTTPException(
@@ -142,18 +142,11 @@ async def retry_download(
             detail=f"Queue entry with ID {queue_id} not found",
         )
 
-    # Reset to pending
+    # Reset to pending — scheduler will pick it up within 30s
     queue_entry.status = DownloadStatus.PENDING
     queue_entry.error_message = None
+    queue_entry.attempts = 0
     db.commit()
-
-    # Try to download immediately
-    download_service = BookDownloadService(db)
-    try:
-        download_service._download_book(queue_entry)
-    except Exception as e:
-        # Error will be logged, queue entry will be marked as failed
-        pass
 
     return RedirectResponse(url="/admin/downloads", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -316,11 +309,18 @@ async def process_queue(
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Manually trigger download queue processing."""
-    download_service = BookDownloadService(db)
-    stats = download_service.process_queue(max_downloads=5)
+    """Manually trigger download queue processing in background."""
+    from ..services.background_jobs import BackgroundJobService
+
+    def _process_queue_job(job_db, job):
+        download_service = BookDownloadService(job_db)
+        stats = download_service.process_queue(max_downloads=5)
+        return stats
+
+    job = BackgroundJobService.create_job(db, "download_batch")
+    BackgroundJobService.submit(job.id, _process_queue_job)
 
     return RedirectResponse(
-        url=f"/admin/downloads?processed={stats['completed']}&failed={stats['failed']}",
+        url="/admin/downloads",
         status_code=status.HTTP_303_SEE_OTHER,
     )
