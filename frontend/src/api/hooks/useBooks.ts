@@ -123,3 +123,16 @@ export function useBookActions() {
     resetMetadata,
   };
 }
+
+export function useBulkBookActions() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ action, bookIds }: { action: string; bookIds: number[] }) =>
+      apiFetch<{ success: boolean; affected: number }>('/books/bulk', {
+        method: 'POST',
+        body: JSON.stringify({ action, book_ids: bookIds }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['books'] }),
+  });
+}

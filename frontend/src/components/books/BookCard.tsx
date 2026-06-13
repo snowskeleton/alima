@@ -6,6 +6,9 @@ import { formatDuration } from '../../utils/format';
 interface BookCardProps {
   book: Book;
   view?: 'grid' | 'list' | 'compact';
+  onContextMenu?: (e: React.MouseEvent, book: Book) => void;
+  selected?: boolean;
+  onSelect?: (bookId: number) => void;
 }
 
 function getStatusBadge(book: Book) {
@@ -21,15 +24,36 @@ function getCoverUrl(book: Book): string {
   return '';
 }
 
-export function BookCard({ book, view = 'grid' }: BookCardProps) {
+export function BookCard({ book, view = 'grid', onContextMenu, selected, onSelect }: BookCardProps) {
   const coverUrl = getCoverUrl(book);
+
+  function handleContextMenu(e: React.MouseEvent) {
+    if (onContextMenu) {
+      e.preventDefault();
+      onContextMenu(e, book);
+    }
+  }
 
   if (view === 'compact') {
     return (
       <Link
         to={`/library/${book.id}`}
-        className="flex items-center gap-3 py-2 px-3 hover:bg-gray-50 rounded-md"
+        className={`flex items-center gap-3 py-2 px-3 hover:bg-gray-50 rounded-md ${selected ? 'bg-indigo-50' : ''}`}
+        onContextMenu={handleContextMenu}
       >
+        {onSelect && (
+          <input
+            type="checkbox"
+            checked={!!selected}
+            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 flex-shrink-0"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onSelect(book.id);
+            }}
+            onChange={() => {}}
+          />
+        )}
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-900 truncate">{book.title}</p>
           <p className="text-xs text-gray-500 truncate">{book.author}</p>
@@ -44,6 +68,7 @@ export function BookCard({ book, view = 'grid' }: BookCardProps) {
       <Link
         to={`/library/${book.id}`}
         className="flex items-center gap-4 py-3 px-4 hover:bg-gray-50 rounded-lg border border-gray-200"
+        onContextMenu={handleContextMenu}
       >
         {coverUrl ? (
           <img src={coverUrl} alt="" className="w-12 h-12 rounded object-cover flex-shrink-0" />
@@ -70,6 +95,7 @@ export function BookCard({ book, view = 'grid' }: BookCardProps) {
     <Link
       to={`/library/${book.id}`}
       className="group block rounded-lg border border-gray-200 overflow-hidden hover:shadow-md transition-shadow"
+      onContextMenu={handleContextMenu}
     >
       <div className="aspect-square bg-gray-100 relative">
         {coverUrl ? (

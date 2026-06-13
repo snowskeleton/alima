@@ -2,10 +2,11 @@
 
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ...config import settings
@@ -116,6 +117,77 @@ async def list_books(
         "offset": offset,
         "limit": limit,
     }
+
+
+class BulkActionRequest(BaseModel):
+    action: str
+    book_ids: List[int]
+
+
+@router.post("/bulk")
+async def bulk_action(
+    body: BulkActionRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Perform a bulk action on multiple books."""
+    valid_actions = {"download", "enable_download", "disable_download", "delete"}
+    if body.action not in valid_actions:
+        raise HTTPException(status_code=400, detail=f"Invalid action: {body.action}")
+
+    if body.action == "delete" and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin required for delete")
+
+    books = db.query(Book).filter(Book.id.in_(body.book_ids)).all()
+    affected = 0
+
+    if body.action == "download":
+        download_service = BookDownloadService(db)
+        for book in books:
+            if not book.file_path and book.source.value == "audible":
+                try:
+                    download_service.download_book_now(book.id)
+                    affected += 1
+                except ValueError:
+                    pass
+
+    elif body.action == "enable_download":
+        for book in books:
+            if not book.file_path:
+                book.download_enabled = True
+                affected += 1
+        db.commit()
+
+    elif body.action == "disable_download":
+        for book in books:
+            if not book.file_path:
+                book.download_enabled = False
+                affected += 1
+        db.commit()
+
+    elif body.action == "delete":
+        for book in books:
+            if book.file_path:
+                file_path = Path(book.file_path)
+                if not file_path.is_absolute():
+                    file_path = settings.audiobooks_path.parent / file_path
+                try:
+                    file_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            if book.cover_image_path:
+                cover_path = Path(book.cover_image_path)
+                if not cover_path.is_absolute():
+                    cover_path = settings.covers_path.parent / cover_path
+                try:
+                    cover_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            db.delete(book)
+            affected += 1
+        db.commit()
+
+    return {"success": True, "affected": affected}
 
 
 @router.get("/{book_id}")
