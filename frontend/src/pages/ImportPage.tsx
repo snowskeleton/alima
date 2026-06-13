@@ -88,7 +88,7 @@ export function ImportPage() {
           <p>Import completed.</p>
           {job.result && typeof job.result === 'object' && 'title' in (job.result as Record<string, unknown>) && (
             <p className="text-sm mt-1">
-              Book: {(job.result as Record<string, unknown>).title as string}
+              Book: {String((job.result as Record<string, unknown>).title)}
             </p>
           )}
           <Button variant="secondary" size="sm" className="mt-2" onClick={resetForm}>
