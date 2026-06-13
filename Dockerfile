@@ -28,7 +28,7 @@ RUN npm run build
 
 # Build React SPA frontend
 COPY frontend/package.json frontend/package-lock.json* ./frontend/
-RUN cd frontend && npm ci
+RUN cd frontend && npm install
 COPY frontend/ ./frontend/
 RUN cd frontend && npm run build && cp -r dist/ ../app/static/spa/
 
