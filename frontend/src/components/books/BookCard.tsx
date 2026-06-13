@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { Book } from '../../api/types';
 import { Badge } from '../ui/Badge';
 import { formatDuration } from '../../utils/format';
@@ -8,7 +8,7 @@ interface BookCardProps {
   view?: 'grid' | 'list' | 'compact';
   onContextMenu?: (e: React.MouseEvent, book: Book) => void;
   selected?: boolean;
-  onSelect?: (bookId: number) => void;
+  onSelect?: (bookId: number, shiftKey: boolean) => void;
 }
 
 function getStatusBadge(book: Book) {
@@ -25,6 +25,7 @@ function getCoverUrl(book: Book): string {
 }
 
 export function BookCard({ book, view = 'grid', onContextMenu, selected, onSelect }: BookCardProps) {
+  const navigate = useNavigate();
   const coverUrl = getCoverUrl(book);
 
   function handleContextMenu(e: React.MouseEvent) {
@@ -35,25 +36,40 @@ export function BookCard({ book, view = 'grid', onContextMenu, selected, onSelec
   }
 
   if (view === 'compact') {
-    return (
-      <Link
-        to={`/library/${book.id}`}
-        className={`flex items-center gap-3 py-2 px-3 hover:bg-gray-50 rounded-md ${selected ? 'bg-indigo-50' : ''}`}
-        onContextMenu={handleContextMenu}
-      >
-        {onSelect && (
+    if (onSelect) {
+      return (
+        <div
+          className={`flex items-center gap-3 py-2 px-3 hover:bg-gray-50 rounded-md cursor-pointer select-none ${selected ? 'bg-indigo-50' : ''}`}
+          onContextMenu={handleContextMenu}
+          onClick={(e) => {
+            if ((e.target as HTMLElement).closest('input[type="checkbox"]')) {
+              onSelect(book.id, e.shiftKey);
+            } else {
+              navigate(`/library/${book.id}`);
+            }
+          }}
+        >
           <input
             type="checkbox"
             checked={!!selected}
             className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 flex-shrink-0"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onSelect(book.id);
-            }}
             onChange={() => {}}
           />
-        )}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-gray-900 truncate">{book.title}</p>
+            <p className="text-xs text-gray-500 truncate">{book.author}</p>
+          </div>
+          {getStatusBadge(book)}
+        </div>
+      );
+    }
+
+    return (
+      <Link
+        to={`/library/${book.id}`}
+        className="flex items-center gap-3 py-2 px-3 hover:bg-gray-50 rounded-md"
+        onContextMenu={handleContextMenu}
+      >
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-900 truncate">{book.title}</p>
           <p className="text-xs text-gray-500 truncate">{book.author}</p>

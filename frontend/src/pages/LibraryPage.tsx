@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useBooks, useBookActions, useBulkBookActions } from '../api/hooks/useBooks';
 import { useAuth } from '../api/hooks/useAuth';
@@ -20,6 +20,7 @@ export function LibraryPage() {
   const [limit, setLimit] = useState(50);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; book: Book } | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const lastSelectedIndex = useRef<number | null>(null);
 
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -53,16 +54,35 @@ export function LibraryPage() {
     setContextMenu({ x: e.clientX, y: e.clientY, book });
   }
 
-  function handleSelect(bookId: number) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(bookId)) {
-        next.delete(bookId);
-      } else {
-        next.add(bookId);
-      }
-      return next;
-    });
+  function handleSelect(bookId: number, shiftKey: boolean) {
+    const currentIndex = books.findIndex((b) => b.id === bookId);
+
+    if (shiftKey && lastSelectedIndex.current !== null) {
+      // Shift-click: select range between last click and this one
+      const start = Math.min(lastSelectedIndex.current, currentIndex);
+      const end = Math.max(lastSelectedIndex.current, currentIndex);
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (let i = start; i <= end; i++) {
+          next.add(books[i].id);
+        }
+        return next;
+      });
+      // Clear text selection caused by shift-click
+      window.getSelection()?.removeAllRanges();
+    } else {
+      // Normal click: toggle single item
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(bookId)) {
+          next.delete(bookId);
+        } else {
+          next.add(bookId);
+        }
+        return next;
+      });
+      lastSelectedIndex.current = currentIndex;
+    }
   }
 
   function handleSelectAll() {
