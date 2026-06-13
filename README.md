@@ -7,7 +7,7 @@ Audiobook library manager for Audible - Download, organize, and share your audio
 Choose your preferred installation method:
 
 - **[Docker](#docker-quick-start)** - Recommended for production
-- **[Python/Manual](#manual-installation)** - For development
+- **[Manual](#manual-installation)** - For development
 
 ## Docker Quick Start
 
@@ -42,6 +42,9 @@ source .venv/bin/activate
 
 # Install requirements
 pip install -r requirements.txt
+
+# Install frontend dependencies
+cd frontend && npm install && cd ..
 ```
 
 ### 2. Configure Environment
@@ -55,16 +58,18 @@ cp .env.example .env
 nano .env
 ```
 
-### 3. Run the Application
+### 3. Build the Frontend
 
 ```bash
-# Make sure you're in the project root directory
-cd /Users/snow/bin/alima2.0
+cd frontend && npm run build && cd ..
+```
 
-# Activate virtual environment if not already active
+This builds the React SPA into `app/static/spa/`, which FastAPI serves automatically.
+
+### 4. Run the Application
+
+```bash
 source .venv/bin/activate
-
-# Run with uvicorn
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -72,63 +77,90 @@ The app will be available at: http://localhost:8000
 
 **First time setup:** The database and data directories will be created automatically on first run.
 
-## Common Commands
+## Development
 
-### Running the App
+### Running in Development Mode
+
+Development requires two processes: the backend server and a frontend watcher that rebuilds on file changes.
 
 ```bash
-# Development mode (with auto-reload)
+# Terminal 1: frontend watcher (rebuilds on save)
+cd frontend && npm run watch
+
+# Terminal 2: backend server (auto-restarts on Python changes)
 source .venv/bin/activate
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-# Production mode (no reload)
-source .venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
-
-# Behind a reverse proxy (Caddy, Nginx, etc.)
-source .venv/bin/activate
-uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-**Important for reverse proxy**: Set `DOMAIN=https://your-domain.com` in `.env` to ensure all URLs are generated with HTTPS.
+After saving a frontend file, Vite rebuilds automatically (~1s). Refresh the browser to see changes. The backend's `--reload` flag auto-restarts on Python file changes.
+
+**Note**: The `.env` file is configured for local development with SQLite. To test with Docker (which uses PostgreSQL), use `docker compose --env-file .env.docker up --build`.
 
 ### Running Tests
 
 ```bash
 source .venv/bin/activate
-pytest
+pytest -v                    # Verbose output
+pytest tests/test_auth.py    # Run specific test file
+pytest -k "test_login"       # Run tests matching pattern
 ```
 
 **Note**: Tests never send real emails. All email functionality is automatically mocked to protect your domain reputation.
 
-### Building Documentation
+### Code Style
 
-```bash
-source .venv/bin/activate
-pip install mkdocs mkdocs-material mkdocstrings[python] pymdown-extensions
-mkdocs serve
+The project uses:
+- Type hints throughout
+- SQLAlchemy 2.0 style with `Mapped` types
+- Async/await for I/O operations
+- Pydantic for configuration and validation
+
+## Architecture
+
 ```
-
-Then visit http://localhost:8001 to view the documentation.
-
-### Database Operations
-
-```bash
-# Initialize database (done automatically on startup)
-source .venv/bin/activate
-python -c "from app.database import init_db; init_db()"
-
-# Drop all tables (WARNING: deletes all data)
-source .venv/bin/activate
-python -c "from app.database import drop_db; drop_db()"
+alima2.0/
+├── app/
+│   ├── main.py              # FastAPI application entry point
+│   ├── config.py            # Configuration management
+│   ├── database.py          # Database setup and session management
+│   ├── models.py            # SQLAlchemy database models
+│   ├── dependencies.py      # FastAPI dependencies (auth, etc.)
+│   ├── routers/
+│   │   ├── api_v2/          # JSON API consumed by the React SPA
+│   │   ├── files.py         # Audiobook/cover file serving
+│   │   ├── rss.py           # RSS feed generation (XML)
+│   │   ├── api.py           # SSE real-time status endpoints
+│   │   └── ext_api.py       # External v1 API for integrations
+│   ├── services/            # Business logic services
+│   │   ├── audible_service.py      # Audible API integration
+│   │   ├── email_service.py        # Email sending
+│   │   ├── settings_service.py     # Settings with encryption
+│   │   └── snowcrypt_service.py    # Encryption for Audible auth
+│   ├── workers/             # Background tasks
+│   │   └── scheduler.py     # Scheduled sync jobs
+│   └── static/              # Static assets
+│       └── spa/             # Built React SPA (generated, not in git)
+├── frontend/                # React SPA source
+│   ├── src/
+│   │   ├── pages/           # Page components
+│   │   ├── components/      # Reusable UI components
+│   │   ├── api/             # API client, hooks, types
+│   │   └── App.tsx          # Router and layout
+│   ├── package.json
+│   └── vite.config.ts       # Vite build config
+├── tests/                   # Test suite
+├── data/                    # Data directory (created on first run)
+│   ├── db/                  # SQLite database
+│   ├── audiobooks/          # Downloaded audiobook files
+│   │   └── unassigned/      # Place files here to match to books
+│   ├── covers/              # Cover images
+│   ├── audible_auth/        # Audible authentication files
+│   └── temp/                # Temporary files
+├── .env                     # Environment configuration (not in git)
+├── .env.example             # Example environment file
+├── requirements.txt         # Python dependencies
+└── README.md
 ```
-
-### Creating the First Admin User
-
-The first user to register will automatically become an admin. Access the registration page at:
-http://localhost:8000/auth/register
-
-After the first user is created, all subsequent registrations require an invite from an admin.
 
 ## Configuration
 
@@ -167,50 +199,6 @@ Edit `.env` file to configure:
 
 **Note**: Settings for sync intervals, download quality, and session expiration can be changed via the web UI at `/admin/settings` without editing files or restarting the server.
 
-## Project Structure
-
-```
-alima2.0/
-├── app/
-│   ├── main.py              # FastAPI application entry point
-│   ├── config.py            # Configuration management
-│   ├── database.py          # Database setup and session management
-│   ├── models.py            # SQLAlchemy database models
-│   ├── dependencies.py      # FastAPI dependencies (auth, etc.)
-│   ├── routers/             # API route handlers
-│   │   ├── auth.py          # Authentication routes
-│   │   ├── admin.py         # Admin routes (users, invites)
-│   │   ├── accounts.py      # Audible account management
-│   │   ├── library.py       # Library/audiobook browsing
-│   │   ├── books.py         # Individual book operations
-│   │   ├── feeds.py         # RSS feed management
-│   │   ├── rss.py           # RSS feed generation
-│   │   ├── import_books.py  # Book import functionality
-│   │   ├── settings.py      # Server settings management
-│   │   └── files.py         # File serving
-│   ├── services/            # Business logic services
-│   │   ├── audible_service.py      # Audible API integration
-│   │   ├── email_service.py        # Email sending
-│   │   ├── settings_service.py     # Settings with encryption
-│   │   └── snowcrypt_service.py    # Encryption for Audible auth
-│   ├── workers/             # Background tasks
-│   │   └── scheduler.py     # Scheduled sync jobs
-│   ├── templates/           # Jinja2 HTML templates
-│   └── static/              # CSS, JS, images
-├── tests/                   # Test suite
-├── data/                    # Data directory (created on first run)
-│   ├── db/                  # SQLite database
-│   ├── audiobooks/          # Downloaded audiobook files
-│   │   └── unassigned/      # Place files here to match to books
-│   ├── covers/              # Cover images
-│   ├── audible_auth/        # Audible authentication files
-│   └── temp/                # Temporary files
-├── .env                     # Environment configuration (not in git)
-├── .env.example             # Example environment file
-├── requirements.txt         # Python dependencies
-└── README.md               # This file
-```
-
 ## Features
 
 ### User Management
@@ -226,11 +214,11 @@ alima2.0/
 
 ### Audiobook Library
 - Browse and search your audiobooks
+- Right-click context menu for quick actions on any book
+- Bulk selection and actions in compact view
 - Automatic metadata and cover download
 - Parallel downloads (configurable concurrency)
 - Book matching - import existing audiobook files
-- Track listening progress
-- Tag and organize books
 
 ### RSS Feeds
 - Create personal RSS feeds for podcast apps
@@ -248,6 +236,12 @@ alima2.0/
 Make sure the virtual environment is activated:
 ```bash
 source .venv/bin/activate
+```
+
+### Frontend not loading / 503 error
+Build the frontend first:
+```bash
+cd frontend && npm run build
 ```
 
 ### Database errors
@@ -283,37 +277,6 @@ If running behind Caddy/Nginx and CSS or images don't load:
 2. Restart Alima - it will automatically generate HTTPS URLs
 
 That's it! The middleware automatically detects HTTPS from your domain setting.
-
-## Development
-
-### Running in Development Mode
-
-```bash
-source .venv/bin/activate
-npm run build                # Build frontend assets (needed after JS/CSS changes)
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-The `--reload` flag enables auto-restart when code changes.
-
-**Note**: The `.env` file is configured for local development with SQLite. To test with Docker (which uses PostgreSQL), use `docker compose --env-file .env.docker up --build`.
-
-### Running Tests
-
-```bash
-source .venv/bin/activate
-pytest -v                    # Verbose output
-pytest tests/test_auth.py    # Run specific test file
-pytest -k "test_login"       # Run tests matching pattern
-```
-
-### Code Style
-
-The project uses:
-- Type hints throughout
-- SQLAlchemy 2.0 style with `Mapped` types
-- Async/await for I/O operations
-- Pydantic for configuration and validation
 
 ## License
 

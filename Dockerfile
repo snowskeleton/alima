@@ -1,4 +1,4 @@
-# Use Python 3.11 slim image for smaller size
+# Use Python 3.14 image
 FROM python:3.14.2
 
 # Set working directory
@@ -15,22 +15,15 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy package.json and install npm dependencies
-COPY package.json package-lock.json* ./
-RUN npm install
-
 # Copy application code
 COPY app/ ./app/
 COPY cli.py .
-
-# Build legacy frontend bundles
-RUN npm run build
 
 # Build React SPA frontend
 COPY frontend/package.json frontend/package-lock.json* ./frontend/
 RUN cd frontend && npm install
 COPY frontend/ ./frontend/
-RUN cd frontend && npm run build && cp -r dist/ ../app/static/spa/
+RUN cd frontend && npm run build
 
 # Create data directories
 RUN mkdir -p /app/data/audiobooks/unassigned \
@@ -48,5 +41,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 # Run the application with Gunicorn + Uvicorn workers for production
 # 4 workers is a good default for most single-server deployments
-# Formula: (2 × CPU cores) + 1, adjust based on your server
+# Formula: (2 x CPU cores) + 1, adjust based on your server
 CMD ["gunicorn", "app.main:app", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-"]

@@ -119,3 +119,5 @@ app/static/js/*.bundle.js
 app/static/js/*.bundle.css
 app/static/js/*.bundle.js.map
 app/static/js/*.bundle.css.map
+app/static/spa/
+frontend/dist/

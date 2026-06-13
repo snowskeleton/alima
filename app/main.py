@@ -9,8 +9,6 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request, status
-from fastapi.exceptions import RequestValidationError
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 # Ensure logs directory exists
@@ -222,36 +220,11 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Exception handler for authentication redirects
 from .dependencies import UnauthenticatedException
 
-templates = Jinja2Templates(directory="app/templates")
-
 
 @app.exception_handler(UnauthenticatedException)
 async def unauthenticated_exception_handler(request: Request, exc: UnauthenticatedException):
     """Handle authentication exceptions by redirecting to login/register."""
     return RedirectResponse(url=exc.redirect_url, status_code=status.HTTP_303_SEE_OTHER)
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Handle validation errors with user-friendly HTML error page."""
-    from .utils.flash import flash
-
-    # Extract error details
-    errors = exc.errors()
-    error_messages = []
-    for error in errors:
-        field = " → ".join(str(loc) for loc in error["loc"])
-        msg = error["msg"]
-        error_messages.append(f"{field}: {msg}")
-
-    error_text = "; ".join(error_messages)
-
-    # Flash error and redirect back
-    flash(request, f"Validation error: {error_text}", "error")
-
-    # Try to redirect to referer, or a sensible default
-    referer = request.headers.get("referer", "/")
-    return RedirectResponse(url=referer, status_code=status.HTTP_303_SEE_OTHER)
 
 
 # Add session middleware for flash messages
@@ -346,40 +319,32 @@ async def root(db: Session = Depends(get_db)):
     return RedirectResponse(url="/library", status_code=303)
 
 
-# Include routers
-from .routers import accounts, admin, api, audit, auth, books, downloads, ext_api, feeds, files, import_books, library, logs, match_books, rss
-from .routers import settings as settings_router
+# Include routers — functional endpoints only (files, RSS, SSE, external API)
+from .routers import api, ext_api, files, rss
 from .routers.api_v2 import router as api_v2_router
 
-app.include_router(auth.router)
-app.include_router(accounts.router)
-app.include_router(admin.router)
 app.include_router(api.router)
-app.include_router(downloads.router)
-app.include_router(library.router)
-app.include_router(books.router)
-app.include_router(feeds.router)
-app.include_router(feeds.feed_detail_router)
-app.include_router(import_books.router)
-app.include_router(match_books.router)
 app.include_router(rss.router)
 app.include_router(files.router)
-app.include_router(settings_router.router)
 app.include_router(ext_api.router)
-app.include_router(logs.router)
-app.include_router(audit.router)
 app.include_router(api_v2_router)
 
-# SPA catch-all: serve index.html for client-side routing
-# Only activates when the SPA has been built
-_spa_index = Path("app/static/spa/index.html")
-if _spa_index.exists():
-    app.mount("/assets", StaticFiles(directory="app/static/spa/assets"), name="spa-assets")
+# SPA catch-all: serve React frontend for all unmatched routes
+_spa_dir = Path("app/static/spa")
+_spa_assets_dir = _spa_dir / "assets"
+_spa_assets_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/assets", StaticFiles(directory=str(_spa_assets_dir)), name="spa-assets")
 
-    @app.get("/{full_path:path}", tags=["SPA"])
-    async def spa_catch_all(request: Request, full_path: str):
-        """Serve React SPA for all unmatched routes."""
-        # Don't catch API, files, static, feed XML, health, or auth routes
-        # that are already handled by other routers
-        from starlette.responses import FileResponse
-        return FileResponse("app/static/spa/index.html")
+
+@app.get("/{full_path:path}", tags=["SPA"])
+async def spa_catch_all(request: Request, full_path: str):
+    """Serve React SPA for all unmatched routes."""
+    from starlette.responses import FileResponse
+
+    spa_index = _spa_dir / "index.html"
+    if spa_index.exists():
+        return FileResponse(str(spa_index))
+    return JSONResponse(
+        status_code=503,
+        content={"error": "Frontend not built. Run: cd frontend && npm run build"},
+    )
