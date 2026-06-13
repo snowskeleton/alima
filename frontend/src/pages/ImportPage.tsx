@@ -79,18 +79,19 @@ export function ImportPage() {
 
       {job && job.status === 'running' && (
         <Alert type="info" className="mb-4">
-          Importing {job.meta?.filename as string}...
+          Importing {String(job.meta?.filename ?? '')}...
         </Alert>
       )}
 
       {job && job.status === 'completed' && (
         <Alert type="success" className="mb-4">
           <p>Import completed.</p>
-          {job.result && typeof job.result === 'object' && 'title' in (job.result as Record<string, unknown>) && (
-            <p className="text-sm mt-1">
-              Book: {String((job.result as Record<string, unknown>).title)}
-            </p>
-          )}
+          {(() => {
+            const r = job.result as Record<string, unknown> | null;
+            return r && typeof r === 'object' && 'title' in r ? (
+              <p className="text-sm mt-1">Book: {String(r.title)}</p>
+            ) : null;
+          })()}
           <Button variant="secondary" size="sm" className="mt-2" onClick={resetForm}>
             Import Another
           </Button>
