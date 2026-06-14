@@ -8,6 +8,8 @@ interface BookFiltersProps {
   onStatusChange: (v: string) => void;
   source: string;
   onSourceChange: (v: string) => void;
+  seriesFilter: string;
+  onSeriesFilterChange: (v: string) => void;
   sort: string;
   onSortChange: (v: string) => void;
   order: string;
@@ -20,6 +22,7 @@ export function BookFilters({
   search, onSearchChange,
   status, onStatusChange,
   source, onSourceChange,
+  seriesFilter, onSeriesFilterChange,
   sort, onSortChange,
   order, onOrderChange,
   view, onViewChange,
@@ -51,6 +54,15 @@ export function BookFilters({
           { value: '', label: 'All Sources' },
           { value: 'audible', label: 'Audible' },
           { value: 'imported', label: 'Imported' },
+        ]}
+      />
+      <Select
+        value={seriesFilter}
+        onChange={(e) => onSeriesFilterChange(e.target.value)}
+        options={[
+          { value: '', label: 'Series/Standalone' },
+          { value: 'series', label: 'Has Series' },
+          { value: 'standalone', label: 'Standalone' },
         ]}
       />
       <Select

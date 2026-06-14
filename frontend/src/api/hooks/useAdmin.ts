@@ -98,10 +98,52 @@ export function useSettingsActions() {
   return { updateSettings, testEmail, removeDefaultCover };
 }
 
-export function useLogs(view = 'stats', lines = 200) {
-  return useQuery<{ lines?: string[]; stats?: Record<string, unknown> }>({
-    queryKey: ['logs', view, lines],
-    queryFn: () => apiFetch(`/logs?view=${view}&lines=${lines}`),
+export interface LogEntry {
+  timestamp: string | null;
+  module: string | null;
+  level: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'OTHER';
+  message: string;
+}
+
+export interface LogFailure {
+  asin: string;
+  book_title: string | null;
+  created_at: string;
+  error_message: string | null;
+}
+
+export interface LogStats {
+  total_downloads: number;
+  successful_downloads: number;
+  failed_downloads: number;
+  pending_downloads: number;
+  total_bytes: number;
+  average_speed_kbps: number;
+  average_duration_seconds: number;
+  downloads_by_day: { date: string; count: number }[];
+  top_quality: string | null;
+  recent_failures: LogFailure[];
+}
+
+export interface LogDownload {
+  id: number;
+  asin: string;
+  book_title: string | null;
+  status: string;
+  file_size_bytes: number | null;
+  duration_seconds: number | null;
+  download_speed_kbps: number | null;
+  download_quality: string | null;
+  attempts: number;
+  error_message: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export function useLogs(view: 'stats' | 'downloads' | 'raw', days = 7, lines = 500) {
+  return useQuery<{ entries?: LogEntry[]; downloads?: LogDownload[] } & Partial<LogStats>>({
+    queryKey: ['logs', view, days, lines],
+    queryFn: () => apiFetch(`/logs?view=${view}&days=${days}&lines=${lines}`),
   });
 }
 

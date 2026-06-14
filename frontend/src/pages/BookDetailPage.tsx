@@ -81,20 +81,48 @@ export function BookDetailPage() {
               {book.publish_date && (
                 <p><span className="text-gray-500">Published:</span> {formatDate(book.publish_date)}</p>
               )}
+              {book.publisher && (
+                <p><span className="text-gray-500">Publisher:</span> {book.publisher}</p>
+              )}
+              {book.file_path && (
+                <p><span className="text-gray-500">File:</span> <span className="font-mono text-xs">{book.file_path.split('/').pop()}</span></p>
+              )}
+              {book.file_size && (
+                <p><span className="text-gray-500">File size:</span> {formatFileSize(book.file_size)}</p>
+              )}
               <p><span className="text-gray-500">Source:</span> <Badge>{book.source}</Badge></p>
               <p><span className="text-gray-500">Added:</span> {formatDate(book.added_at)}</p>
             </div>
 
+            {/* Genres */}
+            {book.genres && (book.genres as string[]).length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {(book.genres as string[]).map(g => (
+                  <span key={g} className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700 border border-indigo-100">
+                    {g}
+                  </span>
+                ))}
+              </div>
+            )}
+
             {/* Download status */}
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className="mt-4 flex flex-wrap gap-2 items-center">
               {book.file_path ? (
-                <Badge color="green">Downloaded ({formatFileSize(book.file_size)})</Badge>
+                <Badge color="green">Downloaded</Badge>
               ) : book.download_unavailable ? (
                 <Badge color="red">Unavailable</Badge>
               ) : !book.download_enabled ? (
                 <Badge color="gray">Download Disabled</Badge>
               ) : (
                 <Badge color="yellow">Pending Download</Badge>
+              )}
+              {book.source === 'audible' && (
+                <Link
+                  to={`/admin/downloads?search=${book.asin}&read_status=`}
+                  className="text-xs text-indigo-600 hover:text-indigo-800"
+                >
+                  View download history →
+                </Link>
               )}
             </div>
 

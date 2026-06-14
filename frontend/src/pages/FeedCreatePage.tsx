@@ -10,6 +10,8 @@ export function FeedCreatePage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [feedType, setFeedType] = useState('smart');
+  const [filterType, setFilterType] = useState('');
+  const [filterValue, setFilterValue] = useState('');
   const [isPublic, setIsPublic] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -23,12 +25,12 @@ export function FeedCreatePage() {
     formData.append('feed_type', feedType);
     formData.append('is_public', String(isPublic));
 
+    if (feedType === 'smart' && filterType && filterValue) {
+      formData.append('filters_json', JSON.stringify([{ type: filterType, value: filterValue }]));
+    }
+
     try {
-      await apiFetch('/feeds', {
-        method: 'POST',
-        body: formData,
-        headers: {},
-      });
+      await apiFetch('/feeds', { method: 'POST', body: formData, headers: {} });
       navigate('/feeds');
     } finally {
       setSaving(false);
@@ -55,9 +57,36 @@ export function FeedCreatePage() {
             { value: 'manual', label: 'Manual (hand-picked)' },
           ]}
         />
+
+        {feedType === 'smart' && (
+          <div className="space-y-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+            <p className="text-xs text-gray-500">Smart feeds automatically include books matching a filter.</p>
+            <Select
+              label="Filter by"
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
+              options={[
+                { value: '', label: 'All books (no filter)' },
+                { value: 'author', label: 'Author' },
+                { value: 'series', label: 'Series' },
+                { value: 'narrator', label: 'Narrator' },
+                { value: 'genre', label: 'Genre' },
+              ]}
+            />
+            {filterType && (
+              <Input
+                label="Filter value"
+                value={filterValue}
+                onChange={(e) => setFilterValue(e.target.value)}
+                placeholder="e.g. Brandon Sanderson"
+              />
+            )}
+          </div>
+        )}
+
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
-          Public feed
+          Public feed (accessible via RSS URL)
         </label>
         <Button type="submit" disabled={saving}>{saving ? 'Creating...' : 'Create Feed'}</Button>
       </form>

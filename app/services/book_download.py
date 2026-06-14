@@ -74,7 +74,7 @@ class BookDownloadService:
         for queue_entry in pending:
             book = self.db.query(Book).filter(Book.id == queue_entry.book_id).first()
             if book and book.download_unavailable:
-                logger.info(f"Skipping book {queue_entry.book_id} - marked as download_unavailable")
+                logger.debug(f"Skipping book {queue_entry.book_id} - marked as download_unavailable")
                 # Remove from queue
                 queue_entry.status = DownloadStatus.FAILED
                 queue_entry.error_message = book.download_error_message or "Book unavailable for download"
@@ -101,7 +101,7 @@ class BookDownloadService:
                     result = future.result()
                     if result["success"]:
                         stats["completed"] += 1
-                        logger.info(f"Successfully completed download for {queue_entry.asin}")
+                        logger.debug(f"Successfully completed download for {queue_entry.asin}")
                     else:
                         stats["failed"] += 1
                         logger.error(f"Failed to download {queue_entry.asin}: {result.get('error')}")
@@ -194,8 +194,7 @@ class BookDownloadService:
             download_quality = get_cached_setting("download_quality", "High", str)
 
             # Request license
-            logger.info(f"Requesting license for {queue_entry.asin} with quality: {download_quality}")
-            logger.debug(f"Requesting license for {queue_entry.asin}")
+            logger.debug(f"Requesting license for {queue_entry.asin} with quality: {download_quality}")
             license_response = client.post(
                 f"content/{queue_entry.asin}/licenserequest",
                 body={
@@ -279,12 +278,9 @@ class BookDownloadService:
             aaxc_file = temp_dir / f"{queue_entry.asin}.aaxc"
             voucher_file = temp_dir / f"{queue_entry.asin}.voucher"
 
-            logger.info(f"Downloading encrypted audiobook file for '{book.title}' ({queue_entry.asin})")
-            logger.debug(f"Downloading .aaxc file for {queue_entry.asin}")
-            # Use the client's raw_request method with apply_cookies=True
-            # CloudFront URLs require website cookies, not just auth headers
+            logger.debug(f"Downloading encrypted .aaxc file for '{book.title}' ({queue_entry.asin})")
             self._download_file(download_url, aaxc_file, client)
-            logger.info(f"Successfully downloaded encrypted file for '{book.title}' ({aaxc_file.stat().st_size} bytes)")
+            logger.debug(f"Downloaded encrypted file for '{book.title}' ({aaxc_file.stat().st_size} bytes)")
 
             # Get and save voucher
             voucher_dict = decrypt_voucher_from_licenserequest(auth, license_response)
@@ -292,7 +288,7 @@ class BookDownloadService:
                 json.dump(voucher_dict, f, indent=2)
 
             # Decrypt to .m4a
-            logger.info(f"Starting decryption for '{book.title}' ({queue_entry.asin})")
+            logger.debug(f"Starting decryption for '{book.title}' ({queue_entry.asin})")
             queue_entry.status = DownloadStatus.DECRYPTING
             self.db.commit()
 
@@ -311,7 +307,7 @@ class BookDownloadService:
                 temp_output_file = settings.temp_path / filename
                 counter += 1
 
-            logger.info(f"Decrypting {queue_entry.asin} to temporary location: {temp_output_file}")
+            logger.debug(f"Decrypting {queue_entry.asin} to temporary location: {temp_output_file}")
 
             # Decrypt using snowcrypt to temp location
             snowcrypt.decrypt_aaxc(
@@ -320,7 +316,7 @@ class BookDownloadService:
                 voucher_dict["key"],
                 voucher_dict["iv"]
             )
-            logger.info(f"Successfully decrypted '{book.title}' ({temp_output_file.stat().st_size} bytes)")
+            logger.debug(f"Successfully decrypted '{book.title}' ({temp_output_file.stat().st_size} bytes)")
 
             # Determine final output location
             output_dir = settings.audiobooks_path
@@ -337,7 +333,7 @@ class BookDownloadService:
 
             # Atomically move completed file from temp to final location
             # This prevents the integrity check from finding incomplete files
-            logger.info(f"Moving decrypted file to final location: {final_output_file}")
+            logger.debug(f"Moving decrypted file to final location: {final_output_file}")
             shutil.move(str(temp_output_file), str(final_output_file))
 
             # Update book record with final path

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useFeeds, useFeedActions } from '../api/hooks/useFeeds';
 import { useAuth } from '../api/hooks/useAuth';
@@ -11,10 +12,18 @@ export function FeedListPage() {
   const { user } = useAuth();
   const { deleteFeed, patchFeed } = useFeedActions();
   const isAdmin = user?.role === 'admin';
+  const [copiedId, setCopiedId] = useState<number | null>(null);
 
   if (isLoading) return <PageSpinner />;
 
   const feeds = data?.feeds ?? [];
+
+  function copyRss(feedId: number, url: string) {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedId(feedId);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  }
 
   return (
     <div>
@@ -28,27 +37,48 @@ export function FeedListPage() {
       {feeds.length === 0 ? (
         <EmptyState title="No feeds" description="Create your first feed to share your library." />
       ) : (
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {feeds.map((feed) => (
-            <div key={feed.id} className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Link to={`/feed/${feed.slug}`} className="text-sm font-medium text-gray-900 hover:text-indigo-600">
+            <div
+              key={feed.id}
+              className="bg-white rounded-lg border border-gray-200 p-4 flex flex-col gap-3 hover:shadow-md transition-shadow cursor-pointer"
+              onClick={() => window.location.href = `/feed/${feed.slug}`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  <Link
+                    to={`/feed/${feed.slug}`}
+                    className="font-semibold text-gray-900 hover:text-indigo-600 truncate"
+                    onClick={e => e.stopPropagation()}
+                  >
                     {feed.name}
+                    {feed.is_pinned && <span className="ml-1">📌</span>}
                   </Link>
-                  <Badge>{feed.feed_type}</Badge>
-                  {feed.is_pinned && <Badge color="indigo">Pinned</Badge>}
-                  {feed.is_system && <Badge color="blue">System</Badge>}
-                  {!feed.is_public && <Badge color="yellow">Private</Badge>}
                 </div>
-                {feed.description && (
-                  <p className="text-xs text-gray-500 mt-1">{feed.description}</p>
-                )}
-                {feed.rss_url && (
-                  <p className="text-xs text-gray-400 mt-1 font-mono">{feed.rss_url}</p>
-                )}
               </div>
-              <div className="flex items-center gap-2">
+
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Badge>{feed.feed_type}</Badge>
+                {feed.is_public
+                  ? <Badge color="green">Public</Badge>
+                  : <Badge color="yellow">Private</Badge>}
+                {feed.is_system && <Badge color="blue">System</Badge>}
+              </div>
+
+              {feed.description && (
+                <p className="text-sm text-gray-500 line-clamp-2">{feed.description}</p>
+              )}
+
+              <div className="flex items-center gap-2 flex-wrap mt-auto" onClick={e => e.stopPropagation()}>
+                {feed.rss_url && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => copyRss(feed.id, feed.rss_url!)}
+                  >
+                    {copiedId === feed.id ? 'Copied!' : 'Copy RSS URL'}
+                  </Button>
+                )}
                 {isAdmin && !feed.is_system && (
                   <Button
                     variant="ghost"
@@ -59,8 +89,8 @@ export function FeedListPage() {
                   </Button>
                 )}
                 {(feed.user_id === user?.id || (isAdmin && feed.is_system)) && (
-                  <Link to={`/feeds/${feed.id}/edit`}>
-                    <Button variant="secondary" size="sm">Edit</Button>
+                  <Link to={`/feeds/${feed.id}/edit`} onClick={e => e.stopPropagation()}>
+                    <Button variant="ghost" size="sm">Edit</Button>
                   </Link>
                 )}
                 {feed.user_id === user?.id && !feed.is_system && (

@@ -14,6 +14,7 @@ export function LibraryPage() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [source, setSource] = useState('');
+  const [seriesFilter, setSeriesFilter] = useState('');
   const [sort, setSort] = useState('added_at');
   const [order, setOrder] = useState('desc');
   const [view, setView] = useState('grid');
@@ -32,6 +33,7 @@ export function LibraryPage() {
     search: search || undefined,
     status: status || undefined,
     source: source || undefined,
+    series_filter: seriesFilter || undefined,
     sort,
     order,
     limit,
@@ -169,6 +171,7 @@ export function LibraryPage() {
         search={search} onSearchChange={setSearch}
         status={status} onStatusChange={setStatus}
         source={source} onSourceChange={setSource}
+        seriesFilter={seriesFilter} onSeriesFilterChange={setSeriesFilter}
         sort={sort} onSortChange={setSort}
         order={order} onOrderChange={setOrder}
         view={view} onViewChange={setView}

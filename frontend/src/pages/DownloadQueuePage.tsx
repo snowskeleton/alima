@@ -22,12 +22,15 @@ export function DownloadQueuePage() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [readStatus, setReadStatus] = useState('unread');
+  const [account, setAccount] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [sort, setSort] = useState('created_at');
   const [order, setOrder] = useState('desc');
   const [selected, setSelected] = useState<number[]>([]);
   const [processJobId, setProcessJobId] = useState<number>();
 
-  const { data, isLoading } = useDownloads({ search, status, read_status: readStatus, sort, order });
+  const { data, isLoading } = useDownloads({ search, status, read_status: readStatus, account, date_from: dateFrom, date_to: dateTo, sort, order });
   const { retry, remove, patch, bulk, processQueue } = useDownloadActions();
   const { data: job } = useJob(processJobId);
 
@@ -109,12 +112,8 @@ export function DownloadQueuePage() {
 
       <div className="bg-white p-4 rounded-lg border border-gray-200 mb-4">
         <div className="flex flex-wrap gap-3">
-          <Input
-            placeholder="Search..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-48"
-          />
+          <Input placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-44" />
+          <Input placeholder="Account…" value={account} onChange={(e) => setAccount(e.target.value)} className="w-36" />
           <Select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
@@ -135,6 +134,10 @@ export function DownloadQueuePage() {
               { value: 'read', label: 'Read' },
             ]}
           />
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" title="From date" />
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" title="To date" />
           <Select
             value={sort}
             onChange={(e) => setSort(e.target.value)}
@@ -144,11 +147,7 @@ export function DownloadQueuePage() {
               { value: 'status', label: 'Status' },
             ]}
           />
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setOrder(order === 'desc' ? 'asc' : 'desc')}
-          >
+          <Button variant="ghost" size="sm" onClick={() => setOrder(order === 'desc' ? 'asc' : 'desc')}>
             {order === 'desc' ? 'Newest first' : 'Oldest first'}
           </Button>
         </div>
@@ -226,11 +225,15 @@ export function DownloadQueuePage() {
                       </span>
                     )}
                   </div>
-                  <div className="text-xs text-gray-500 space-x-3">
+                  <div className="text-xs text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
                     {entry.book_author && <span>{entry.book_author}</span>}
-                    {entry.account_username && <span>Account: {entry.account_username}</span>}
+                    <span className="font-mono text-gray-400">{entry.asin}</span>
+                    {entry.account_username && <span>{entry.account_username}</span>}
                     {entry.file_size_bytes && <span>{formatFileSize(entry.file_size_bytes)}</span>}
+                    {entry.download_speed_kbps && <span>{(entry.download_speed_kbps / 1024).toFixed(1)} MB/s</span>}
+                    {entry.download_quality && <span>{entry.download_quality}</span>}
                     {entry.duration_seconds && <span>{formatDuration(entry.duration_seconds)}</span>}
+                    {entry.attempts > 1 && <span>{entry.attempts} attempts</span>}
                     <span>{timeAgo(entry.created_at)}</span>
                   </div>
                   {entry.error_message && (

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...dependencies import require_admin
-from ...models import User
+from ...models import Book, User
 from ...services.book_matcher import BookMatcherService
 
 router = APIRouter(prefix="/match-books", tags=["Match Books"])
@@ -16,9 +16,33 @@ async def get_matches(
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Get unmatched files with potential matches."""
+    """Get unmatched files with top candidate matches for each."""
     matcher = BookMatcherService(db)
-    matches = matcher.find_matches()
+    files = matcher.scan_unassigned_files()
+
+    available_books = db.query(Book).filter(Book.file_path.is_(None)).all()
+
+    matches = []
+    for file_info in files:
+        scored = []
+        for book in available_books:
+            raw_score = matcher._calculate_match_score(file_info["metadata"], book)
+            if raw_score > 0:
+                scored.append({
+                    "book_id": book.id,
+                    "title": book.title or "",
+                    "author": book.author or "",
+                    "score": round(raw_score / 100, 2),
+                })
+
+        scored.sort(key=lambda x: x["score"], reverse=True)
+
+        matches.append({
+            "filename": file_info["filename"],
+            "file_path": str(file_info["file_path"]),
+            "candidates": scored[:5],
+        })
+
     return {"matches": matches}
 
 

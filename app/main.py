@@ -3,7 +3,6 @@
 import json
 import logging
 import os
-import re
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -67,9 +66,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from starlette_csrf import CSRFMiddleware
 
 from .config import settings
 from .database import get_db, init_db
@@ -226,31 +223,6 @@ async def unauthenticated_exception_handler(request: Request, exc: Unauthenticat
     """Handle authentication exceptions by redirecting to login/register."""
     return RedirectResponse(url=exc.redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
-
-# Add session middleware for flash messages
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=settings.secret_key,
-    session_cookie="alima_session",
-    max_age=7 * 24 * 60 * 60,  # 7 days
-    same_site="lax",
-    https_only=settings.domain.startswith("https://"),
-)
-
-# Add CSRF protection for state-changing operations
-app.add_middleware(
-    CSRFMiddleware,
-    secret=settings.secret_key,
-    cookie_name="alima_csrf",
-    cookie_secure=settings.domain.startswith("https://"),
-    cookie_samesite="lax",
-    header_name="x-csrf-token",  # Match the header name we're sending from JavaScript
-    exempt_urls=[
-        re.compile(r"^/health$"),
-        re.compile(r"^/api/v1/"),
-        re.compile(r"^/api/v2/"),
-    ],
-)
 
 # Force HTTPS URLs when DOMAIN is set to HTTPS
 # This ensures correct URL generation behind reverse proxies

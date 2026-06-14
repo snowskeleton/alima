@@ -72,7 +72,7 @@ def run_migration_008_add_download_type(db: Session, engine) -> None:
         column_exists = "download_type" in columns
 
     if column_exists:
-        logger.info(f"Column download_type already exists, ensuring migration is marked as applied")
+        logger.debug(f"Column download_type already exists, ensuring migration is marked as applied")
         if not has_migration_been_applied(db, migration_name):
             mark_migration_applied(db, migration_name)
         return
@@ -86,12 +86,12 @@ def run_migration_008_add_download_type(db: Session, engine) -> None:
         )
         db.commit()
 
-    logger.info(f"Running migration: {migration_name}")
+    logger.debug(f"Running migration: {migration_name}")
 
     try:
         if is_postgres:
             # PostgreSQL: Create enum type first, then add column
-            logger.info("Creating downloadtype enum type...")
+            logger.debug("Creating downloadtype enum type...")
             db.execute(text("""
                 DO $$ BEGIN
                     CREATE TYPE downloadtype AS ENUM ('book', 'cover');
@@ -101,14 +101,14 @@ def run_migration_008_add_download_type(db: Session, engine) -> None:
             """))
             db.commit()
 
-            logger.info("Adding download_type column to download_queue table...")
+            logger.debug("Adding download_type column to download_queue table...")
             db.execute(text("""
                 ALTER TABLE download_queue
                 ADD COLUMN download_type downloadtype DEFAULT 'book'::downloadtype NOT NULL
             """))
         else:
             # SQLite
-            logger.info("Adding download_type column to download_queue table...")
+            logger.debug("Adding download_type column to download_queue table...")
             db.execute(text("""
                 ALTER TABLE download_queue
                 ADD COLUMN download_type VARCHAR(10) DEFAULT 'book' NOT NULL
@@ -145,7 +145,7 @@ def run_migration_009_add_cover_url(db: Session, engine) -> None:
         column_exists = "cover_url" in columns
 
     if column_exists:
-        logger.info(f"Column cover_url already exists, ensuring migration is marked as applied")
+        logger.debug(f"Column cover_url already exists, ensuring migration is marked as applied")
         if not has_migration_been_applied(db, migration_name):
             mark_migration_applied(db, migration_name)
         return
@@ -158,10 +158,10 @@ def run_migration_009_add_cover_url(db: Session, engine) -> None:
         )
         db.commit()
 
-    logger.info(f"Running migration: {migration_name}")
+    logger.debug(f"Running migration: {migration_name}")
 
     try:
-        logger.info("Adding cover_url column to books table...")
+        logger.debug("Adding cover_url column to books table...")
         if is_postgres:
             db.execute(text("""
                 ALTER TABLE books
@@ -204,7 +204,7 @@ def run_migration_010_add_purchased_at(db: Session, engine) -> None:
         column_exists = "purchased_at" in columns
 
     if column_exists:
-        logger.info(f"Column purchased_at already exists, ensuring migration is marked as applied")
+        logger.debug(f"Column purchased_at already exists, ensuring migration is marked as applied")
         if not has_migration_been_applied(db, migration_name):
             mark_migration_applied(db, migration_name)
         return
@@ -217,10 +217,10 @@ def run_migration_010_add_purchased_at(db: Session, engine) -> None:
         )
         db.commit()
 
-    logger.info(f"Running migration: {migration_name}")
+    logger.debug(f"Running migration: {migration_name}")
 
     try:
-        logger.info("Adding purchased_at column to books table...")
+        logger.debug("Adding purchased_at column to books table...")
         if is_postgres:
             db.execute(text("""
                 ALTER TABLE books
@@ -249,10 +249,10 @@ def run_migration_011_fix_download_type_enum(db: Session, engine) -> None:
     is_postgres = "postgresql" in str(engine.url)
 
     if has_migration_been_applied(db, migration_name):
-        logger.info(f"Migration {migration_name} already applied")
+        logger.debug(f"Migration {migration_name} already applied")
         return
 
-    logger.info(f"Running migration: {migration_name}")
+    logger.debug(f"Running migration: {migration_name}")
 
     try:
         if is_postgres:
@@ -265,7 +265,7 @@ def run_migration_011_fix_download_type_enum(db: Session, engine) -> None:
                 ORDER BY e.enumsortorder
             """))
             enum_values = [row[0] for row in result.fetchall()]
-            logger.info(f"Current downloadtype enum values: {enum_values}")
+            logger.debug(f"Current downloadtype enum values: {enum_values}")
 
             # Check if we have both uppercase and lowercase (shouldn't happen, but just in case)
             has_uppercase = 'BOOK' in enum_values or 'COVER' in enum_values
@@ -273,15 +273,15 @@ def run_migration_011_fix_download_type_enum(db: Session, engine) -> None:
 
             if has_uppercase and not has_lowercase:
                 # Enum only has uppercase - already correct, just ensure data matches
-                logger.info("Enum has uppercase values - verifying data...")
+                logger.debug("Enum has uppercase values - verifying data...")
                 # Check if there's any data to update (shouldn't be, but check anyway)
                 result = db.execute(text("SELECT COUNT(*) FROM download_queue"))
                 count = result.scalar()
                 if count > 0:
-                    logger.info("No data migration needed - enum already correct")
+                    logger.debug("No data migration needed - enum already correct")
             elif has_lowercase and not has_uppercase:
                 # Enum only has lowercase - need to add uppercase and migrate
-                logger.info("Enum has lowercase values - adding uppercase values and migrating data")
+                logger.debug("Enum has lowercase values - adding uppercase values and migrating data")
 
                 # Add uppercase values to enum
                 if 'BOOK' not in enum_values:
@@ -302,10 +302,10 @@ def run_migration_011_fix_download_type_enum(db: Session, engine) -> None:
                     WHERE download_type::text = 'cover'
                 """))
                 db.commit()
-                logger.info("Data migration complete")
+                logger.debug("Data migration complete")
             elif has_uppercase and has_lowercase:
                 # Both exist - just migrate data to uppercase
-                logger.info("Enum has both uppercase and lowercase values - migrating data to uppercase")
+                logger.debug("Enum has both uppercase and lowercase values - migrating data to uppercase")
                 db.execute(text("""
                     UPDATE download_queue
                     SET download_type = 'BOOK'
@@ -317,10 +317,10 @@ def run_migration_011_fix_download_type_enum(db: Session, engine) -> None:
                     WHERE download_type::text = 'cover'
                 """))
                 db.commit()
-                logger.info("Data migration complete")
+                logger.debug("Data migration complete")
         else:
             # SQLite: Just update any lowercase values to uppercase
-            logger.info("Checking SQLite download_type values...")
+            logger.debug("Checking SQLite download_type values...")
             result = db.execute(text("""
                 SELECT COUNT(*) FROM download_queue
                 WHERE download_type IN ('book', 'cover')
@@ -328,7 +328,7 @@ def run_migration_011_fix_download_type_enum(db: Session, engine) -> None:
             count = result.scalar()
 
             if count > 0:
-                logger.info(f"Updating {count} SQLite download_type values to uppercase...")
+                logger.debug(f"Updating {count} SQLite download_type values to uppercase...")
                 db.execute(text("""
                     UPDATE download_queue
                     SET download_type = 'BOOK'
@@ -340,9 +340,9 @@ def run_migration_011_fix_download_type_enum(db: Session, engine) -> None:
                     WHERE download_type = 'cover'
                 """))
                 db.commit()
-                logger.info("SQLite data migration complete")
+                logger.debug("SQLite data migration complete")
             else:
-                logger.info("No SQLite data to migrate")
+                logger.debug("No SQLite data to migrate")
 
         mark_migration_applied(db, migration_name)
         logger.info(f"Migration {migration_name} completed successfully!")
@@ -360,12 +360,12 @@ def run_migration_012_fix_lowercase_download_types(db: Session, engine) -> None:
     migration_name = "012_fix_lowercase_download_types"
 
     if has_migration_been_applied(db, migration_name):
-        logger.info(f"Migration {migration_name} already applied")
+        logger.debug(f"Migration {migration_name} already applied")
         return
 
     is_postgres = "postgresql" in str(engine.url)
 
-    logger.info(f"Running migration: {migration_name}")
+    logger.debug(f"Running migration: {migration_name}")
 
     try:
         if is_postgres:
@@ -377,7 +377,7 @@ def run_migration_012_fix_lowercase_download_types(db: Session, engine) -> None:
             count = result.scalar()
 
             if count > 0:
-                logger.info(f"Found {count} rows with lowercase download_type values")
+                logger.debug(f"Found {count} rows with lowercase download_type values")
 
                 # First ensure uppercase enum values exist
                 result = db.execute(text("""
@@ -406,9 +406,9 @@ def run_migration_012_fix_lowercase_download_types(db: Session, engine) -> None:
                     WHERE download_type::text = 'cover'
                 """))
                 db.commit()
-                logger.info(f"Updated {count} rows to uppercase")
+                logger.debug(f"Updated {count} rows to uppercase")
             else:
-                logger.info("No lowercase download_type values found")
+                logger.debug("No lowercase download_type values found")
         else:
             # SQLite: Update any lowercase values
             result = db.execute(text("""
@@ -418,7 +418,7 @@ def run_migration_012_fix_lowercase_download_types(db: Session, engine) -> None:
             count = result.scalar()
 
             if count > 0:
-                logger.info(f"Found {count} rows with lowercase download_type values")
+                logger.debug(f"Found {count} rows with lowercase download_type values")
                 db.execute(text("""
                     UPDATE download_queue
                     SET download_type = 'BOOK'
@@ -430,9 +430,9 @@ def run_migration_012_fix_lowercase_download_types(db: Session, engine) -> None:
                     WHERE download_type = 'cover'
                 """))
                 db.commit()
-                logger.info(f"Updated {count} rows to uppercase")
+                logger.debug(f"Updated {count} rows to uppercase")
             else:
-                logger.info("No lowercase download_type values found")
+                logger.debug("No lowercase download_type values found")
 
         mark_migration_applied(db, migration_name)
         logger.info(f"Migration {migration_name} completed successfully!")
@@ -454,17 +454,17 @@ def run_migration_013_add_indexes_and_cascades(db: Session, engine) -> None:
     migration_name = "013_add_indexes_and_cascades"
 
     if has_migration_been_applied(db, migration_name):
-        logger.info(f"Migration {migration_name} already applied, skipping")
+        logger.debug(f"Migration {migration_name} already applied, skipping")
         return
 
-    logger.info(f"Running migration {migration_name}...")
+    logger.debug(f"Running migration {migration_name}...")
 
     try:
         is_postgresql = engine.url.drivername.startswith("postgresql")
 
         if is_postgresql:
             # PostgreSQL: Add indexes
-            logger.info("Adding database indexes...")
+            logger.debug("Adding database indexes...")
 
             # Check and add indexes if they don't exist
             indexes_to_add = [
@@ -478,7 +478,7 @@ def run_migration_013_add_indexes_and_cascades(db: Session, engine) -> None:
             for sql, index_name in indexes_to_add:
                 try:
                     db.execute(text(sql))
-                    logger.info(f"  ✓ Added index on {index_name}")
+                    logger.debug(f"  ✓ Added index on {index_name}")
                 except Exception as e:
                     logger.warning(f"  ⚠ Failed to add index on {index_name}: {e}")
 
@@ -486,7 +486,7 @@ def run_migration_013_add_indexes_and_cascades(db: Session, engine) -> None:
 
             # PostgreSQL: Update foreign key constraints
             # Note: This is complex - we need to drop and recreate constraints
-            logger.info("Updating foreign key constraints with CASCADE behavior...")
+            logger.debug("Updating foreign key constraints with CASCADE behavior...")
 
             fk_updates = [
                 # Invites: created_by -> users.id (CASCADE)
@@ -571,7 +571,7 @@ def run_migration_013_add_indexes_and_cascades(db: Session, engine) -> None:
                         ON DELETE {fk['action']}
                     """))
 
-                    logger.info(f"  ✓ Updated {fk['table']}.{fk['column']} -> {fk['action']}")
+                    logger.debug(f"  ✓ Updated {fk['table']}.{fk['column']} -> {fk['action']}")
                 except Exception as e:
                     logger.warning(f"  ⚠ Failed to update FK {fk['table']}.{fk['column']}: {e}")
 
@@ -579,7 +579,7 @@ def run_migration_013_add_indexes_and_cascades(db: Session, engine) -> None:
 
         else:
             # SQLite: Add indexes
-            logger.info("Adding database indexes (SQLite)...")
+            logger.debug("Adding database indexes (SQLite)...")
 
             indexes_to_add = [
                 ("CREATE INDEX IF NOT EXISTS idx_books_file_path ON books(file_path)", "books.file_path"),
@@ -592,7 +592,7 @@ def run_migration_013_add_indexes_and_cascades(db: Session, engine) -> None:
             for sql, index_name in indexes_to_add:
                 try:
                     db.execute(text(sql))
-                    logger.info(f"  ✓ Added index on {index_name}")
+                    logger.debug(f"  ✓ Added index on {index_name}")
                 except Exception as e:
                     logger.warning(f"  ⚠ Failed to add index on {index_name}: {e}")
 
@@ -634,7 +634,7 @@ def run_migration_014_add_user_notifications(db: Session, engine) -> None:
         column_exists = "receive_notifications" in columns
 
     if column_exists:
-        logger.info(f"Column receive_notifications already exists, ensuring migration is marked as applied")
+        logger.debug(f"Column receive_notifications already exists, ensuring migration is marked as applied")
         if not has_migration_been_applied(db, migration_name):
             mark_migration_applied(db, migration_name)
         return
@@ -647,17 +647,17 @@ def run_migration_014_add_user_notifications(db: Session, engine) -> None:
         )
         db.commit()
 
-    logger.info(f"Running migration: {migration_name}")
+    logger.debug(f"Running migration: {migration_name}")
 
     try:
-        logger.info("Adding receive_notifications column to users table...")
+        logger.debug("Adding receive_notifications column to users table...")
         if is_postgres:
             db.execute(text("""
                 ALTER TABLE users
                 ADD COLUMN receive_notifications BOOLEAN DEFAULT FALSE NOT NULL
             """))
             # Enable notifications for existing admin users
-            logger.info("Enabling notifications for existing admin users...")
+            logger.debug("Enabling notifications for existing admin users...")
             db.execute(text("""
                 UPDATE users
                 SET receive_notifications = TRUE
@@ -669,7 +669,7 @@ def run_migration_014_add_user_notifications(db: Session, engine) -> None:
                 ADD COLUMN receive_notifications BOOLEAN DEFAULT 0 NOT NULL
             """))
             # Enable notifications for existing admin users
-            logger.info("Enabling notifications for existing admin users...")
+            logger.debug("Enabling notifications for existing admin users...")
             db.execute(text("""
                 UPDATE users
                 SET receive_notifications = 1
@@ -691,12 +691,12 @@ def run_migration_015_magic_links(db: Session, engine) -> None:
     migration_name = "015_magic_links"
 
     if has_migration_been_applied(db, migration_name):
-        logger.info(f"Migration {migration_name} already applied")
+        logger.debug(f"Migration {migration_name} already applied")
         return
 
     is_postgres = "postgresql" in str(engine.url)
 
-    logger.info(f"Running migration: {migration_name}")
+    logger.debug(f"Running migration: {migration_name}")
 
     try:
         # Step 1: Make password_hash nullable
@@ -713,7 +713,7 @@ def run_migration_015_magic_links(db: Session, engine) -> None:
             columns = result.fetchall()
             password_col = [c for c in columns if c[1] == 'password_hash']
             if password_col and password_col[0][3] == 1:  # notnull flag
-                logger.info("Recreating users table with nullable password_hash (SQLite)...")
+                logger.debug("Recreating users table with nullable password_hash (SQLite)...")
                 # Get current column definitions
                 col_defs = []
                 for col in columns:
@@ -749,7 +749,7 @@ def run_migration_015_magic_links(db: Session, engine) -> None:
                 db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users(email)"))
 
         db.commit()
-        logger.info("password_hash column is now nullable")
+        logger.debug("password_hash column is now nullable")
 
         # Step 2: Create magic_links table
         if is_postgres:
@@ -794,7 +794,7 @@ def run_migration_016_create_api_keys(db: Session, engine) -> None:
     migration_name = "016_create_api_keys"
 
     if has_migration_been_applied(db, migration_name):
-        logger.info(f"Migration {migration_name} already applied")
+        logger.debug(f"Migration {migration_name} already applied")
         return
 
     is_postgres = "postgresql" in str(engine.url)
@@ -815,11 +815,11 @@ def run_migration_016_create_api_keys(db: Session, engine) -> None:
         table_exists = result.fetchone() is not None
 
     if table_exists:
-        logger.info("Table api_keys already exists, marking migration as applied")
+        logger.debug("Table api_keys already exists, marking migration as applied")
         mark_migration_applied(db, migration_name)
         return
 
-    logger.info(f"Running migration: {migration_name}")
+    logger.debug(f"Running migration: {migration_name}")
 
     try:
         if is_postgres:
@@ -861,7 +861,7 @@ def run_all_pending_migrations(db: Session) -> None:
     """Run all pending migrations in order."""
     from .database import engine
 
-    logger.info("Checking for pending migrations...")
+    logger.debug("Checking for pending migrations...")
 
     # Ensure migration tracking table exists
     get_migration_table(engine)
@@ -887,4 +887,4 @@ def run_all_pending_migrations(db: Session) -> None:
             # Don't stop on migration errors, continue with others
             continue
 
-    logger.info("Migration check complete")
+    logger.debug("Migration check complete")
