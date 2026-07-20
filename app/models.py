@@ -194,6 +194,8 @@ class Book(Base):
     file_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True, index=True)
     file_size: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     file_format: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    b2_audio_key: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    b2_cover_key: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     download_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     download_unavailable: Mapped[bool] = mapped_column(Boolean, default=False)
     download_error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

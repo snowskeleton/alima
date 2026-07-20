@@ -32,6 +32,9 @@ apscheduler==3.11.2
 # HTTP Client (for downloads)
 httpx==0.23.3
 
+# Cloud Storage
+boto3==1.35.0
+
 # Utilities
 python-dotenv==1.2.1
 pydantic-settings==2.12.0

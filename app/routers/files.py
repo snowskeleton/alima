@@ -3,12 +3,13 @@
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
 from ..models import Book
+from ..services.storage import get_storage_service
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
@@ -23,8 +24,8 @@ async def serve_audiobook(
     Serve audiobook file.
 
     Public endpoint (no authentication required).
+    Redirects to a signed B2 URL when available, otherwise serves from disk.
     """
-    # Get book
     book = db.query(Book).filter(Book.id == book_id).first()
 
     if not book:
@@ -33,14 +34,24 @@ async def serve_audiobook(
             detail=f"Book with ID {book_id} not found",
         )
 
-    # Construct file path
+    # Redirect to B2 if the file has been uploaded there
+    storage = get_storage_service()
+    if storage and book.b2_audio_key:
+        url = storage.get_signed_url(book.b2_audio_key)
+        return RedirectResponse(url, status_code=302)
+
+    # Fall back to local file serving
+    if not book.file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Audio file not found",
+        )
+
     file_path = Path(book.file_path)
 
-    # If file_path is relative, make it absolute relative to audiobooks_path parent
     if not file_path.is_absolute():
         file_path = settings.audiobooks_path.parent / file_path
 
-    # Security check: ensure the resolved path is within audiobooks directory
     try:
         file_path = file_path.resolve()
         audiobooks_base_resolved = settings.audiobooks_path.parent.resolve()
@@ -50,6 +61,8 @@ async def serve_audiobook(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied",
             )
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -59,10 +72,9 @@ async def serve_audiobook(
     if not file_path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Audio file not found",
+            detail="Audio file not found",
         )
 
-    # Determine media type
     media_types = {
         "m4a": "audio/mp4",
         "m4b": "audio/x-m4b",
@@ -70,7 +82,6 @@ async def serve_audiobook(
     }
     media_type = media_types.get(ext.lower(), "application/octet-stream")
 
-    # Serve file
     return FileResponse(
         path=file_path,
         media_type=media_type,
@@ -85,11 +96,15 @@ async def serve_cover(filepath: str):
 
     Public endpoint (no authentication required).
     Supports subdirectories (e.g., /covers/feeds/uuid.jpg).
+
+    Covers prefer the local file and fall back to B2, the opposite of
+    audiobooks. Covers are small enough that serving them locally costs little
+    bandwidth, and this avoids a database lookup on every request — a library
+    grid view fires dozens at once. The B2 fallback still means covers keep
+    working if local files are ever pruned.
     """
-    # Construct full path
     file_path = settings.covers_path / filepath
 
-    # Security check: ensure the resolved path is within covers_path
     try:
         file_path = file_path.resolve()
         covers_path_resolved = settings.covers_path.resolve()
@@ -99,6 +114,8 @@ async def serve_cover(filepath: str):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied",
             )
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -106,12 +123,18 @@ async def serve_cover(filepath: str):
         )
 
     if not file_path.exists():
+        # Local file is gone — fall back to B2 if it's configured. The B2 key
+        # for a cover is always its path relative to the data dir.
+        storage = get_storage_service()
+        if storage:
+            url = storage.get_signed_url(f"covers/{filepath}")
+            return RedirectResponse(url, status_code=302)
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Cover image not found: {filepath}",
         )
 
-    # Determine media type
     ext = file_path.suffix.lower()
     media_types = {
         ".jpg": "image/jpeg",

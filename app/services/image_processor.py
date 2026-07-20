@@ -10,6 +10,7 @@ from fastapi import UploadFile
 from PIL import Image
 
 from ..config import settings
+from .storage import get_storage_service
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,15 @@ class ImageProcessorService:
             processed_image = self._process_image(image)
 
             # Save the image
-            relative_path = self._save_image(processed_image)
+            relative_path, disk_path = self._save_image(processed_image)
+
+            # Upload to B2 if configured
+            storage = get_storage_service()
+            if storage:
+                try:
+                    storage.upload_file(disk_path, relative_path)
+                except Exception as e:
+                    logger.error(f"B2 upload failed for feed cover: {e}", exc_info=True)
 
             logger.info(f"Processed feed cover image: {relative_path}")
             return relative_path
@@ -125,7 +134,7 @@ class ImageProcessorService:
 
         return image
 
-    def _save_image(self, image: Image.Image) -> str:
+    def _save_image(self, image: Image.Image) -> tuple[str, Path]:
         """
         Save processed image to disk.
 
@@ -133,7 +142,7 @@ class ImageProcessorService:
             image: PIL Image object to save
 
         Returns:
-            Relative path to saved image
+            Tuple of (relative_path, absolute_disk_path)
         """
         # Ensure feeds cover directory exists
         feeds_cover_dir = settings.covers_path / "feeds"
@@ -146,8 +155,7 @@ class ImageProcessorService:
         # Save as JPEG with high quality
         image.save(file_path, "JPEG", quality=90, optimize=True)
 
-        # Return relative path from data/ directory
-        return f"covers/feeds/{filename}"
+        return f"covers/feeds/{filename}", file_path
 
     def delete_cover(self, cover_path: str) -> bool:
         """

@@ -240,6 +240,72 @@ def sync(ctx, account_id: int | None):
         click.echo(f"❌ Error: {e}")
 
 
+@cli.command()
+@click.option("--limit", type=int, default=None, help="Maximum books to upload (default: all)")
+@click.option("--concurrent", type=int, default=2, help="Parallel upload workers")
+@click.option("--dry-run", is_flag=True, help="List what would be uploaded without uploading")
+def backfill_b2(limit: int, concurrent: int, dry_run: bool):
+    """Upload existing audiobooks and covers to Backblaze B2.
+
+    Uploads any book that has a local file but no B2 key yet. Safe to re-run —
+    already-uploaded books are skipped. This is the same operation the scheduler
+    performs automatically; use this to migrate an existing library in one pass.
+    """
+    from app.services.b2_upload import B2UploadService
+    from app.services.storage import get_storage_service
+
+    if not get_storage_service():
+        click.echo("❌ B2 is not configured or not enabled.")
+        click.echo("   Set B2_ENABLED=true and the B2_* credentials in your .env")
+        return
+
+    db = get_db()
+    try:
+        service = B2UploadService(db)
+        pending = service.find_pending(limit=limit)
+
+        if not pending:
+            click.echo("✓ Nothing to upload — every book with a local file is already in B2.")
+            return
+
+        click.echo(f"Found {len(pending)} book(s) needing upload:\n")
+        for book in pending[:20]:
+            needs = []
+            if not book.b2_audio_key:
+                needs.append("audio")
+            if book.cover_image_path and not book.b2_cover_key:
+                needs.append("cover")
+            click.echo(f"  [{book.id}] {book.title} ({', '.join(needs)})")
+        if len(pending) > 20:
+            click.echo(f"  ... and {len(pending) - 20} more")
+
+        if dry_run:
+            click.echo("\n(dry run — nothing uploaded)")
+            return
+
+        if not click.confirm(f"\nUpload {len(pending)} book(s) to B2?"):
+            click.echo("Aborted.")
+            return
+
+        click.echo("")
+        with click.progressbar(length=len(pending), label="Uploading") as bar:
+            def on_progress(book, stats):
+                bar.update(1)
+
+            stats = service.process_pending(
+                limit=limit,
+                max_concurrent=concurrent,
+                progress_callback=on_progress,
+            )
+
+        click.echo(f"\n✓ Uploaded: {stats['uploaded']}")
+        if stats["failed"]:
+            click.echo(f"❌ Failed: {stats['failed']} (see logs; re-run to retry)")
+
+    finally:
+        db.close()
+
+
 # TODO: Add more commands as we progress through phases
 # - scan-audiobooks: Scan and import existing audiobooks
 # - set-mode: Set replication mode

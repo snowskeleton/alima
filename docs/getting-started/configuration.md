@@ -97,6 +97,53 @@ SESSION_EXPIRE_HOURS=168  # 7 days
 INVITE_EXPIRE_DAYS=7
 ```
 
+### Backblaze B2 Storage (Optional)
+
+By default Alima stores audiobooks and cover images on local disk and serves them directly. Enabling B2 offloads delivery to Backblaze's servers — podcast clients are redirected to short-lived signed URLs, so large file transfers bypass your home connection entirely.
+
+**Setup:**
+
+1. Create a **private** bucket at [backblaze.com](https://www.backblaze.com)
+2. Create an App Key with Read + Write access to that bucket
+3. Copy your endpoint URL from *Buckets → Bucket Details → Endpoint*
+
+```bash
+B2_ENABLED=true
+B2_BUCKET_NAME=my-audiobooks-bucket
+B2_ENDPOINT_URL=https://s3.us-west-004.backblazeb2.com
+B2_ACCESS_KEY_ID=your-keyID-here
+B2_SECRET_ACCESS_KEY=your-applicationKey-here
+
+# How long signed download URLs remain valid (default: 1 hour)
+B2_SIGNED_URL_TTL_SECONDS=3600
+```
+
+!!! info "RSS feed URLs are unchanged"
+    Your podcast app's feed URL (`/feeds/slug.xml`) and enclosure URLs (`/files/audiobooks/...`) stay the same. The server issues a 302 redirect to a signed B2 URL transparently — podcast clients follow it automatically.
+
+!!! tip "Rollout"
+    Leave `B2_ENABLED=false` (the default) to keep serving files locally. Once you enable B2, new downloads are uploaded automatically. Existing books without a B2 key continue to be served from disk, so you can migrate gradually.
+
+**Uploading your existing library**
+
+Enabling B2 only affects new downloads. To upload books you already have:
+
+```bash
+# See what would be uploaded
+python cli.py backfill-b2 --dry-run
+
+# Upload everything (safe to re-run; skips what's already done)
+python cli.py backfill-b2
+
+# Or go slower to limit bandwidth
+python cli.py backfill-b2 --limit 20 --concurrent 1
+```
+
+Uploads also run automatically in the background every 2 minutes, so a freshly downloaded book reaches B2 on its own — the CLI command just does it all at once instead of waiting.
+
+!!! note "Local files are kept"
+    Files stay on disk after upload. B2 saves you upload bandwidth when people listen, not disk space. Keeping the local copy is also what lets serving fall back gracefully if a B2 upload hasn't happened yet.
+
 ### Advanced Settings
 
 ```bash

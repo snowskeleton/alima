@@ -3,11 +3,12 @@ import { useSettings, useSettingsActions } from '../api/hooks/useAdmin';
 import { PageSpinner } from '../components/ui/Spinner';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { Select } from '../components/ui/Select';
 import { Alert } from '../components/ui/Alert';
 
 export function SettingsPage() {
   const { data, isLoading } = useSettings();
-  const { updateSettings, testEmail, removeDefaultCover } = useSettingsActions();
+  const { updateSettings, testEmail, testB2, removeDefaultCover } = useSettingsActions();
   const [form, setForm] = useState<Record<string, string>>({});
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -48,6 +49,17 @@ export function SettingsPage() {
       setTimeout(() => setMessage(''), 3000);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Test email failed');
+    }
+  };
+
+  const handleTestB2 = async () => {
+    setError('');
+    try {
+      await testB2.mutateAsync();
+      setMessage('Connected to B2 successfully.');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'B2 connection failed');
     }
   };
 
@@ -153,6 +165,73 @@ export function SettingsPage() {
                 {testEmail.isPending ? 'Sending...' : 'Send Test'}
               </Button>
             </div>
+          </div>
+        </section>
+
+        <section className="bg-white p-6 rounded-lg border border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900 mb-1">Storage (Backblaze B2)</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            When enabled, audiobooks are uploaded to B2 and listeners are redirected there
+            instead of downloading from this server. Local files are kept either way.
+          </p>
+          <div className="space-y-4">
+            <Select
+              label="Enable B2 Storage"
+              value={form.b2_enabled === 'true' ? 'true' : 'false'}
+              onChange={(e) => update('b2_enabled', e.target.value)}
+              options={[
+                { value: 'false', label: 'Disabled — serve files from this server' },
+                { value: 'true', label: 'Enabled — upload to B2 and redirect' },
+              ]}
+            />
+
+            {form.b2_enabled === 'true' && (
+              <>
+                <Input
+                  label="Bucket Name"
+                  value={form.b2_bucket_name ?? ''}
+                  onChange={(e) => update('b2_bucket_name', e.target.value)}
+                  placeholder="my-audiobooks-bucket"
+                />
+                <Input
+                  label="Endpoint URL"
+                  value={form.b2_endpoint_url ?? ''}
+                  onChange={(e) => update('b2_endpoint_url', e.target.value)}
+                  placeholder="https://s3.us-west-004.backblazeb2.com"
+                />
+                <Input
+                  label="Key ID"
+                  value={form.b2_access_key_id ?? ''}
+                  onChange={(e) => update('b2_access_key_id', e.target.value)}
+                />
+                <Input
+                  label="Application Key"
+                  type="password"
+                  value={form.b2_secret_access_key ?? ''}
+                  onChange={(e) => update('b2_secret_access_key', e.target.value)}
+                  placeholder="Leave blank to keep the saved key"
+                />
+                <Input
+                  label="Signed URL Lifetime (seconds)"
+                  value={form.b2_signed_url_ttl_seconds ?? ''}
+                  onChange={(e) => update('b2_signed_url_ttl_seconds', e.target.value)}
+                  placeholder="3600"
+                />
+
+                <div className="flex items-center gap-3 pt-2">
+                  <Button
+                    variant="secondary"
+                    onClick={handleTestB2}
+                    disabled={testB2.isPending}
+                  >
+                    {testB2.isPending ? 'Testing...' : 'Test Connection'}
+                  </Button>
+                  <span className="text-sm text-gray-500">
+                    Save your settings before testing.
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         </section>
 

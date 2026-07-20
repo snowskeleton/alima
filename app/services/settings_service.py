@@ -21,6 +21,7 @@ class SettingsService:
         "smtp_password",
         "secret_key",
         "jwt_secret_key",
+        "b2_secret_access_key",
     }
 
     def __init__(self, db: Session):
@@ -109,6 +110,12 @@ class SettingsService:
         # Only domain comes from config
         if key == "domain":
             return app_settings.domain
+
+        # B2 storage falls back to its B2_* environment variables, so an
+        # existing .env-based setup keeps working after these became editable
+        # in the Server Settings UI.
+        if key.startswith("b2_"):
+            return getattr(app_settings, key, None)
 
         # All other settings have hardcoded defaults
         # These are the defaults if not set in Server Settings UI

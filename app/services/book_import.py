@@ -119,6 +119,7 @@ class BookImportService:
         if self.metadata_service.extract_cover_art(dest_path, cover_dest_path):
             cover_image_path = f"covers/{cover_filename}"
 
+        # Create book record first so we have an ID for the B2 audio key
         # Determine metadata source
         has_overrides = any([title, author, narrator, series, series_position, description, publisher])
         metadata_source = MetadataSource.MANUAL if has_overrides else MetadataSource.FILE
@@ -146,6 +147,9 @@ class BookImportService:
         self.db.add(book)
         self.db.commit()
         self.db.refresh(book)
+
+        # B2 upload happens in the scheduled sweep (services/b2_upload.py) rather
+        # than inline, so a large upload never blocks the import request.
 
         logger.info(f"Imported book: {book.title} (ID: {book.id})")
 

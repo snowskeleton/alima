@@ -857,6 +857,50 @@ def run_migration_016_create_api_keys(db: Session, engine) -> None:
         raise
 
 
+def run_migration_017_add_b2_keys(db: Session, engine) -> None:
+    """Add Backblaze B2 storage key columns to the books table."""
+    migration_name = "017_add_b2_keys"
+
+    is_postgres = "postgresql" in str(engine.url)
+
+    column_exists = False
+    if is_postgres:
+        result = db.execute(text("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name='books' AND column_name='b2_audio_key'
+        """))
+        column_exists = result.fetchone() is not None
+    else:
+        result = db.execute(text("PRAGMA table_info(books)"))
+        columns = [col[1] for col in result.fetchall()]
+        column_exists = "b2_audio_key" in columns
+
+    if column_exists:
+        logger.debug("B2 key columns already exist, ensuring migration is marked as applied")
+        if not has_migration_been_applied(db, migration_name):
+            mark_migration_applied(db, migration_name)
+        return
+
+    if has_migration_been_applied(db, migration_name):
+        logger.warning(f"Migration {migration_name} was marked as applied but columns don't exist - re-running")
+        db.execute(text("DELETE FROM schema_migrations WHERE migration_name = :name"), {"name": migration_name})
+        db.commit()
+
+    logger.debug(f"Running migration: {migration_name}")
+
+    try:
+        db.execute(text("ALTER TABLE books ADD COLUMN b2_audio_key VARCHAR(512)"))
+        db.execute(text("ALTER TABLE books ADD COLUMN b2_cover_key VARCHAR(512)"))
+        db.commit()
+        mark_migration_applied(db, migration_name)
+        logger.info(f"Migration {migration_name} completed successfully!")
+
+    except Exception as e:
+        logger.error(f"Migration {migration_name} failed: {e}", exc_info=True)
+        db.rollback()
+        raise
+
+
 def run_all_pending_migrations(db: Session) -> None:
     """Run all pending migrations in order."""
     from .database import engine
@@ -877,6 +921,7 @@ def run_all_pending_migrations(db: Session) -> None:
         run_migration_014_add_user_notifications,
         run_migration_015_magic_links,
         run_migration_016_create_api_keys,
+        run_migration_017_add_b2_keys,
     ]
 
     for migration_func in migrations:
