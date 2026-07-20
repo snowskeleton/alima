@@ -296,7 +296,8 @@ from .routers import api, ext_api, files, rss
 from .routers.api_v2 import router as api_v2_router
 
 app.include_router(api.router)
-app.include_router(rss.router)
+app.include_router(rss.router, prefix="/feed")
+app.include_router(rss.router, prefix="/feeds")
 app.include_router(files.router)
 app.include_router(ext_api.router)
 app.include_router(api_v2_router)

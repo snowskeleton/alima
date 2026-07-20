@@ -8,7 +8,10 @@ from ..database import get_db
 from ..models import Feed, FeedBook
 from ..services.feed_generator import FeedGeneratorService
 
-router = APIRouter(prefix="/feeds", tags=["RSS"])
+# No prefix here on purpose: main.py mounts this router at BOTH "/feeds" (the
+# original path, kept so existing subscriptions keep resolving) and "/feed" (the
+# path advertised as rss_url in api_v2/feeds.py).
+router = APIRouter(tags=["RSS"])
 
 
 @router.get("/{slug}.xml")

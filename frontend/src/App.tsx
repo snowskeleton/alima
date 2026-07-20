@@ -35,15 +35,19 @@ export default function App() {
       <Route path="/auth/magic-link-sent" element={<MagicLinkSentPage />} />
       <Route path="/auth/magic-link" element={<MagicLinkCallbackPage />} />
 
+      {/* Public routes with shell — anonymous visitors must reach these.
+          The server decides what's visible: /feeds/by-slug/{slug} 403s on a
+          private feed, so the guard here would only ever be redundant. */}
+      <Route element={<AppShell />}>
+        <Route path="/feed/:slug" element={<FeedDetailPage />} />
+      </Route>
+
       {/* Authenticated routes with shell */}
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
           <Route path="/auth/profile" element={<ProfilePage />} />
           <Route path="/library" element={<LibraryPage />} />
           <Route path="/library/:bookId" element={<BookDetailPage />} />
-
-          {/* Public feed detail */}
-          <Route path="/feed/:slug" element={<FeedDetailPage />} />
 
           {/* Feeds */}
           <Route path="/feeds" element={<FeedListPage />} />
