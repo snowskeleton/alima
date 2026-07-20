@@ -76,6 +76,10 @@ services:
       - ./data/audible_auth:/app/data/audible_auth
       - ./data/temp:/app/data/temp
       - ./data/logs:/app/data/logs
+      # Only used if DATABASE_URL points at SQLite. Mounted regardless so that
+      # switching to SQLite can't silently put the database inside the
+      # container, where every rebuild would wipe it.
+      - ./data/db:/app/data/db
 
     # Optional: Add a reverse proxy network if using Caddy/Nginx
     # networks:

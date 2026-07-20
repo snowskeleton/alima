@@ -364,6 +364,28 @@ class BookMatcherService:
         logger.info(f"Imported new book: {book.title} (ID: {book.id})")
         return book
 
+    def delete_file(self, filename: str) -> dict:
+        """
+        Delete an unmatched file from the unassigned directory.
+
+        Args:
+            filename: Name of file in unassigned directory
+
+        Returns:
+            Dict with deletion result
+
+        Raises:
+            ValueError: If file not found
+        """
+        file_path = self.unassigned_path / filename
+        if not file_path.exists():
+            raise ValueError(f"File not found: {filename}")
+
+        file_path.unlink()
+        logger.info(f"Deleted unmatched file: {filename}")
+
+        return {"success": True, "filename": filename}
+
     def _sanitize_filename(self, filename: str) -> str:
         """
         Sanitize filename by removing invalid characters.

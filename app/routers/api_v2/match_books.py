@@ -110,5 +110,8 @@ async def delete_unmatched(
 ):
     """Delete an unmatched file."""
     matcher = BookMatcherService(db)
-    result = matcher.delete_file(filename)
+    try:
+        result = matcher.delete_file(filename)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     return result

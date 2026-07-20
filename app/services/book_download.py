@@ -346,6 +346,11 @@ class BookDownloadService:
             # The file is now in the audiobooks directory, so the database must be updated ASAP
             self.db.commit()
 
+            # B2 upload is NOT done here on purpose — a multi-hundred-MB upload
+            # would hold this download worker for its whole duration and stall
+            # the queue. The scheduled B2 upload sweep picks this book up on its
+            # next pass (see services/b2_upload.py).
+
             # Clean up temp files
             aaxc_file.unlink(missing_ok=True)
             voucher_file.unlink(missing_ok=True)
@@ -504,6 +509,7 @@ class BookDownloadService:
                 f.write(response.content)
 
             # Update book record with relative path
+            # (B2 upload happens in the scheduled sweep — see services/b2_upload.py)
             book.cover_image_path = f"covers/{cover_filename}"
 
             # Mark as completed

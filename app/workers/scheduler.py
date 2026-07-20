@@ -101,6 +101,29 @@ def process_download_queue():
         db.close()
 
 
+def process_b2_uploads():
+    """Periodic task to upload downloaded books to Backblaze B2."""
+    from ..services.b2_upload import B2UploadService
+    from ..services.storage import get_storage_service
+
+    if not get_storage_service():
+        return
+
+    logger.debug("Starting scheduled B2 upload sweep")
+    db = SessionLocal()
+    try:
+        stats = B2UploadService(db).process_pending()
+        if stats["attempted"] > 0:
+            from ..main import format_dict_pretty
+            logger.info(f"Scheduled B2 upload completed:{format_dict_pretty(stats)}")
+        else:
+            logger.debug("Scheduled B2 upload completed: nothing pending")
+    except Exception as e:
+        logger.error(f"Error in scheduled B2 upload: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """Start the background scheduler."""
     if scheduler.running:
@@ -142,6 +165,17 @@ def start_scheduler():
         replace_existing=True,
     )
     logger.debug("Scheduled download processing to run every 30 seconds")
+
+    # Add B2 upload sweep (no-op unless B2 is configured). Runs less often than
+    # the download queue since uploads are large and not latency-sensitive.
+    scheduler.add_job(
+        process_b2_uploads,
+        trigger=IntervalTrigger(minutes=2),
+        id="process_b2_uploads",
+        name="Upload downloaded books to Backblaze B2",
+        replace_existing=True,
+    )
+    logger.debug("Scheduled B2 upload sweep to run every 2 minutes")
 
     # Start the scheduler
     scheduler.start()

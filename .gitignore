@@ -121,3 +121,8 @@ app/static/js/*.bundle.js.map
 app/static/js/*.bundle.css.map
 app/static/spa/
 frontend/dist/
+
+# Claude Code
+# Project config (launch.json, agents, commands) is shared and committed.
+# settings.local.json holds per-developer permission grants — keep it local.
+.claude/settings.local.json

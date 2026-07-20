@@ -29,7 +29,11 @@ class Settings(BaseSettings):
         return v
 
     # Database
-    database_url: str = "postgresql+psycopg://alima:changeme@postgres:5432/alima"
+    # Plain "postgresql://" resolves to psycopg2, which is what requirements.txt
+    # pins. Do not use "postgresql+psycopg://" (psycopg 3) here unless psycopg is
+    # added to requirements.txt — it is not installed in the Docker image, so the
+    # fallback would fail at startup whenever DATABASE_URL is unset.
+    database_url: str = "postgresql://alima:changeme@postgres:5432/alima"
 
     # Paths
     audiobooks_path: Path = Path("/app/data/audiobooks")
@@ -58,6 +62,14 @@ class Settings(BaseSettings):
     rsync_user: str | None = None
     rsync_host: str | None = None
     rsync_path: str | None = None
+
+    # Backblaze B2 Storage
+    b2_enabled: bool = False
+    b2_bucket_name: str | None = None
+    b2_endpoint_url: str | None = None  # https://{accountId}.s3.{region}.backblazeb2.com
+    b2_access_key_id: str | None = None
+    b2_secret_access_key: str | None = None
+    b2_signed_url_ttl_seconds: int = 3600
 
     model_config = SettingsConfigDict(
         env_file=".env",

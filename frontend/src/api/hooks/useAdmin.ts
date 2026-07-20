@@ -90,12 +90,16 @@ export function useSettingsActions() {
       }),
   });
 
+  const testB2 = useMutation({
+    mutationFn: () => apiFetch('/settings/test-b2', { method: 'POST' }),
+  });
+
   const removeDefaultCover = useMutation({
     mutationFn: () => apiFetch('/settings/default-cover', { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] }),
   });
 
-  return { updateSettings, testEmail, removeDefaultCover };
+  return { updateSettings, testEmail, testB2, removeDefaultCover };
 }
 
 export interface LogEntry {
