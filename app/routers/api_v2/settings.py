@@ -21,6 +21,7 @@ SETTING_KEYS = [
     "smtp_from_email", "smtp_from_name",
     "b2_enabled", "b2_bucket_name", "b2_endpoint_url",
     "b2_access_key_id", "b2_secret_access_key", "b2_signed_url_ttl_seconds",
+    "b2_reconcile_interval_hours",
 ]
 
 # Secrets are returned masked and a blank submission means "leave unchanged",

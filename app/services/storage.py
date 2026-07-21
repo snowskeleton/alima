@@ -11,6 +11,7 @@ from pathlib import Path
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 from ..utils.settings_cache import get_cached_setting
 
@@ -38,19 +39,52 @@ class B2StorageService:
             config=Config(signature_version="s3v4"),
         )
 
-    def upload_file(self, local_path: Path, key: str) -> None:
-        """Upload a local file to B2."""
+    def upload_file(self, local_path: Path, key: str, content_type: str | None = None) -> None:
+        """
+        Upload a local file to B2.
+
+        Pass content_type for audio. boto3's upload_file does NOT sniff it, so
+        without this S3 stores "binary/octet-stream" and podcast players refuse
+        the episode.
+        """
         logger.info(f"Uploading {local_path} to B2 key {key!r}")
-        self._client.upload_file(str(local_path), self._bucket, key)
+        extra = {"ContentType": content_type} if content_type else None
+        self._client.upload_file(str(local_path), self._bucket, key, ExtraArgs=extra)
         logger.info(f"Upload complete: {key}")
 
-    def get_signed_url(self, key: str) -> str:
-        """Generate a presigned GET URL expiring after the configured TTL."""
+    def get_signed_url(self, key: str, content_type: str | None = None) -> str:
+        """
+        Generate a presigned GET URL expiring after the configured TTL.
+
+        content_type is served back via ResponseContentType, which overrides
+        whatever is stored on the object. That deliberately also repairs files
+        uploaded before upload_file started setting ContentType — no re-upload
+        of anyone's existing library needed.
+        """
+        params = {"Bucket": self._bucket, "Key": key}
+        if content_type:
+            params["ResponseContentType"] = content_type
         return self._client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": self._bucket, "Key": key},
+            Params=params,
             ExpiresIn=self._signed_url_ttl,
         )
+
+    def file_exists(self, key: str) -> bool:
+        """
+        Whether the bucket actually holds this key.
+
+        Raises on anything other than a clean "not found" — a credential or
+        network failure must NOT be reported as a missing object, or callers
+        would treat an outage as proof the file is gone and discard good keys.
+        """
+        try:
+            self._client.head_object(Bucket=self._bucket, Key=key)
+            return True
+        except ClientError as e:
+            if e.response.get("ResponseMetadata", {}).get("HTTPStatusCode") == 404:
+                return False
+            raise
 
     def delete_file(self, key: str) -> None:
         """Delete a file from B2."""

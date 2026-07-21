@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import Book, Feed, FeedType
+from ..utils.media_types import audio_media_type
 
 logger = logging.getLogger(__name__)
 
@@ -271,13 +272,7 @@ class FeedGeneratorService:
         file_format = book.file_format or "m4b"
         audio_url = f"{domain}/files/audiobooks/{book.id}.{file_format}"
 
-        # Determine media type based on format
-        media_types = {
-            "m4a": "audio/mp4",
-            "m4b": "audio/x-m4b",
-            "mp3": "audio/mpeg",
-        }
-        media_type = media_types.get(file_format.lower(), "audio/x-m4b")
+        media_type = audio_media_type(file_format)
 
         enclosure = SubElement(
             item,

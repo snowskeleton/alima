@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..database import SessionLocal
 from ..models import Book
+from ..utils.media_types import audio_media_type
 from .storage import get_storage_service
 
 logger = logging.getLogger(__name__)
@@ -106,7 +107,11 @@ class B2UploadService:
 
                 if audio_path.exists():
                     key = audio_key_for(book)
-                    storage.upload_file(audio_path, key)
+                    storage.upload_file(
+                        audio_path,
+                        key,
+                        content_type=audio_media_type(book.file_format),
+                    )
                     book.b2_audio_key = key
                     uploaded = True
                 else:
@@ -138,6 +143,58 @@ class B2UploadService:
                 f"(attempt {count}/{MAX_UPLOAD_ATTEMPTS}): {e}"
             )
             return False
+
+    def reconcile_keys(self) -> dict:
+        """
+        Drop b2_* keys whose objects are no longer in the bucket.
+
+        A key can go stale without anything here being wrong: the object was
+        deleted in the B2 console, the bucket was recreated, or — the case that
+        prompted this — the key scheme changed and old rows kept pointing at the
+        previous naming. A stale key is worse than no key, because serving
+        prefers B2 and hands clients a signed URL that 404s. Clearing it makes
+        the local copy authoritative again AND makes find_pending() re-upload
+        under the current scheme, so the next pass repairs it.
+
+        A B2 outage must not be mistaken for missing objects: file_exists()
+        raises on non-404 errors and this counts them as 'errors' and leaves the
+        key alone.
+        """
+        storage = get_storage_service()
+        if not storage:
+            return {"checked": 0, "cleared": 0, "errors": 0}
+
+        stats = {"checked": 0, "cleared": 0, "errors": 0}
+        books = (
+            self.db.query(Book)
+            .filter((Book.b2_audio_key.isnot(None)) | (Book.b2_cover_key.isnot(None)))
+            .order_by(Book.id)
+            .all()
+        )
+
+        for book in books:
+            for field in ("b2_audio_key", "b2_cover_key"):
+                key = getattr(book, field)
+                if not key:
+                    continue
+
+                stats["checked"] += 1
+                try:
+                    if not storage.file_exists(key):
+                        logger.warning(
+                            f"Book {book.id} '{book.title}': {field} {key!r} is not in "
+                            f"B2; clearing so it re-uploads"
+                        )
+                        setattr(book, field, None)
+                        stats["cleared"] += 1
+                except Exception as e:
+                    logger.error(f"Could not verify {field} {key!r} for book {book.id}: {e}")
+                    stats["errors"] += 1
+
+        if stats["cleared"]:
+            self.db.commit()
+
+        return stats
 
     def process_pending(
         self,

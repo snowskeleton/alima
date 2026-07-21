@@ -1,5 +1,6 @@
 """Routes for serving static files (audiobooks, covers)."""
 
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,11 +11,17 @@ from ..config import settings
 from ..database import get_db
 from ..models import Book
 from ..services.storage import get_storage_service
+from ..utils.media_types import audio_media_type
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
 
-@router.get("/audiobooks/{book_id}.{ext}")
+# HEAD as well as GET: podcast players HEAD the enclosure to check size and type
+# before downloading, and FastAPI's .get() registers GET only — a HEAD was 405ing,
+# which players report as the episode being unavailable.
+@router.api_route("/audiobooks/{book_id}.{ext}", methods=["GET", "HEAD"])
 async def serve_audiobook(
     book_id: int,
     ext: str,
@@ -34,11 +41,41 @@ async def serve_audiobook(
             detail=f"Book with ID {book_id} not found",
         )
 
-    # Redirect to B2 if the file has been uploaded there
+    # Redirect to B2 if the file is really there.
+    #
+    # The existence check is not paranoia: a b2_audio_key recorded under an older
+    # key scheme points at nothing, and redirecting to a signed URL for a missing
+    # object gives the client a 404 from B2 — which podcast players report as the
+    # episode being deleted by the publisher. Verify, then fall through to the
+    # local copy, which is the whole reason we keep one.
+    #
+    # 307 rather than 302: it preserves the method, so the HEAD a podcast player
+    # sends before downloading stays a HEAD against B2 instead of becoming a GET.
     storage = get_storage_service()
     if storage and book.b2_audio_key:
-        url = storage.get_signed_url(book.b2_audio_key)
-        return RedirectResponse(url, status_code=302)
+        try:
+            present = storage.file_exists(book.b2_audio_key)
+        except Exception as e:
+            # B2 unreachable — say nothing about the key, just serve locally.
+            logger.warning(f"B2 check failed for book {book.id}, serving locally: {e}")
+            present = False
+        else:
+            if not present:
+                # Self-heal: drop the dead key so the upload scan re-uploads it
+                # under the current scheme instead of failing forever.
+                logger.warning(
+                    f"Book {book.id} b2_audio_key {book.b2_audio_key!r} missing from "
+                    f"B2; clearing it and serving the local copy"
+                )
+                book.b2_audio_key = None
+                db.commit()
+
+        if present:
+            url = storage.get_signed_url(
+                book.b2_audio_key,
+                content_type=audio_media_type(book.file_format or ext),
+            )
+            return RedirectResponse(url, status_code=307)
 
     # Fall back to local file serving
     if not book.file_path:
@@ -75,21 +112,14 @@ async def serve_audiobook(
             detail="Audio file not found",
         )
 
-    media_types = {
-        "m4a": "audio/mp4",
-        "m4b": "audio/x-m4b",
-        "mp3": "audio/mpeg",
-    }
-    media_type = media_types.get(ext.lower(), "application/octet-stream")
-
     return FileResponse(
         path=file_path,
-        media_type=media_type,
+        media_type=audio_media_type(ext),
         filename=f"{book.title}.{ext}",
     )
 
 
-@router.get("/covers/{filepath:path}")
+@router.api_route("/covers/{filepath:path}", methods=["GET", "HEAD"])
 async def serve_cover(filepath: str):
     """
     Serve cover image.
@@ -128,7 +158,7 @@ async def serve_cover(filepath: str):
         storage = get_storage_service()
         if storage:
             url = storage.get_signed_url(f"covers/{filepath}")
-            return RedirectResponse(url, status_code=302)
+            return RedirectResponse(url, status_code=307)
 
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

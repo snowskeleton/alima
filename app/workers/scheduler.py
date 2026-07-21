@@ -124,6 +124,31 @@ def process_b2_uploads():
         db.close()
 
 
+def reconcile_b2_keys():
+    """Periodic task to drop b2 keys whose objects have vanished from the bucket."""
+    from ..services.b2_upload import B2UploadService
+    from ..services.storage import get_storage_service
+
+    if not get_storage_service():
+        return
+
+    logger.debug("Starting scheduled B2 key reconciliation")
+    db = SessionLocal()
+    try:
+        stats = B2UploadService(db).reconcile_keys()
+        if stats["cleared"] or stats["errors"]:
+            logger.info(
+                f"B2 reconciliation: checked {stats['checked']}, "
+                f"cleared {stats['cleared']}, errors {stats['errors']}"
+            )
+        else:
+            logger.debug(f"B2 reconciliation: all {stats['checked']} keys present")
+    except Exception as e:
+        logger.error(f"Error in scheduled B2 reconciliation: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """Start the background scheduler."""
     if scheduler.running:
@@ -135,6 +160,7 @@ def start_scheduler():
 
     quick_sync_interval_minutes = get_cached_setting("quick_sync_interval_minutes", 1, int)
     full_sync_interval_minutes = get_cached_setting("full_sync_interval_minutes", 1440, int)
+    b2_reconcile_interval_hours = get_cached_setting("b2_reconcile_interval_hours", 6, int)
 
     # Add quick sync job (runs frequently to check for new books)
     scheduler.add_job(
@@ -176,6 +202,21 @@ def start_scheduler():
         replace_existing=True,
     )
     logger.debug("Scheduled B2 upload sweep to run every 2 minutes")
+
+    # Verify stored B2 keys still resolve. Hourly, not minutely: it costs one
+    # HEAD per key, and objects don't disappear on their own often enough to
+    # justify hammering the bucket. The serving path self-heals on demand
+    # anyway — this is the sweep that catches files nobody has requested yet.
+    scheduler.add_job(
+        reconcile_b2_keys,
+        trigger=IntervalTrigger(hours=b2_reconcile_interval_hours),
+        id="reconcile_b2_keys",
+        name="Verify Backblaze B2 keys still exist",
+        replace_existing=True,
+    )
+    logger.debug(
+        f"Scheduled B2 key reconciliation to run every {b2_reconcile_interval_hours} hours"
+    )
 
     # Start the scheduler
     scheduler.start()

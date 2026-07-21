@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 import { AdminRoute } from './components/layout/AdminRoute';
@@ -71,8 +71,11 @@ export default function App() {
         </Route>
       </Route>
 
-      {/* Default redirect */}
-      <Route path="*" element={<LibraryPage />} />
+      {/* Default redirect. Must be a real redirect, not a bare <LibraryPage />:
+          rendering it directly bypasses ProtectedRoute and AppShell, so an
+          unknown URL showed anonymous visitors a chrome-less page of failed
+          requests instead of sending them to login. */}
+      <Route path="*" element={<Navigate to="/library" replace />} />
     </Routes>
   );
 }

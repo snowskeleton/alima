@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     b2_access_key_id: str | None = None
     b2_secret_access_key: str | None = None
     b2_signed_url_ttl_seconds: int = 3600
+    b2_reconcile_interval_hours: int = 6
 
     model_config = SettingsConfigDict(
         env_file=".env",
