@@ -8,6 +8,8 @@ settings: database value > .env > hardcoded default.
 import logging
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
+from time import monotonic
 
 import boto3
 from botocore.config import Config
@@ -28,6 +30,8 @@ class B2StorageService:
         access_key_id: str,
         secret_access_key: str,
         signed_url_ttl: int = 3600,
+        max_pool_connections: int = 50,
+        existence_cache_ttl: int = 300,
     ):
         self._bucket = bucket
         self._signed_url_ttl = signed_url_ttl
@@ -36,8 +40,23 @@ class B2StorageService:
             endpoint_url=endpoint_url,
             aws_access_key_id=access_key_id,
             aws_secret_access_key=secret_access_key,
-            config=Config(signature_version="s3v4"),
+            # Default pool is 10. A podcast player prefetching a large feed fires
+            # many concurrent serves, each doing one head_object; a small pool
+            # thrashes ("connection pool is full, discarding connection").
+            config=Config(
+                signature_version="s3v4",
+                max_pool_connections=max_pool_connections,
+            ),
         )
+        # Short-lived existence cache. Most keys exist, and the same feed's
+        # episodes get requested repeatedly; without this every serve is a B2
+        # round-trip. Only positive ("present") results are cached — a missing
+        # key gets cleared off the book row by the caller, so it won't be asked
+        # about again, and caching a false negative could pin a just-uploaded
+        # file as absent.
+        self._existence_cache_ttl = existence_cache_ttl
+        self._present_until: dict[str, float] = {}
+        self._cache_lock = Lock()
 
     def upload_file(self, local_path: Path, key: str, content_type: str | None = None) -> None:
         """
@@ -50,6 +69,8 @@ class B2StorageService:
         logger.info(f"Uploading {local_path} to B2 key {key!r}")
         extra = {"ContentType": content_type} if content_type else None
         self._client.upload_file(str(local_path), self._bucket, key, ExtraArgs=extra)
+        with self._cache_lock:
+            self._present_until[key] = monotonic() + self._existence_cache_ttl
         logger.info(f"Upload complete: {key}")
 
     def get_signed_url(self, key: str, content_type: str | None = None) -> str:
@@ -77,17 +98,31 @@ class B2StorageService:
         Raises on anything other than a clean "not found" — a credential or
         network failure must NOT be reported as a missing object, or callers
         would treat an outage as proof the file is gone and discard good keys.
+
+        A positive result is cached for existence_cache_ttl seconds so a feed of
+        hundreds of books doesn't head_object the same objects on every serve.
         """
+        now = monotonic()
+        with self._cache_lock:
+            expiry = self._present_until.get(key)
+            if expiry is not None and expiry > now:
+                return True
+
         try:
             self._client.head_object(Bucket=self._bucket, Key=key)
-            return True
         except ClientError as e:
             if e.response.get("ResponseMetadata", {}).get("HTTPStatusCode") == 404:
                 return False
             raise
 
+        with self._cache_lock:
+            self._present_until[key] = now + self._existence_cache_ttl
+        return True
+
     def delete_file(self, key: str) -> None:
         """Delete a file from B2."""
+        with self._cache_lock:
+            self._present_until.pop(key, None)
         try:
             self._client.delete_object(Bucket=self._bucket, Key=key)
             logger.info(f"Deleted B2 key {key!r}")
@@ -132,6 +167,8 @@ def _build_service(
     access_key_id: str,
     secret_access_key: str,
     signed_url_ttl: int,
+    max_pool_connections: int,
+    existence_cache_ttl: int,
 ) -> B2StorageService:
     """
     Cache the boto3 client per distinct credential set.
@@ -148,6 +185,8 @@ def _build_service(
         access_key_id,
         secret_access_key,
         signed_url_ttl,
+        max_pool_connections,
+        existence_cache_ttl,
     )
 
 
@@ -173,6 +212,8 @@ def get_storage_service() -> B2StorageService | None:
             return None
 
         ttl = get_cached_setting("b2_signed_url_ttl_seconds", 3600, int)
+        max_pool = get_cached_setting("b2_max_pool_connections", 50, int)
+        existence_ttl = get_cached_setting("b2_existence_cache_ttl_seconds", 300, int)
 
         return _build_service(
             bucket,
@@ -180,6 +221,8 @@ def get_storage_service() -> B2StorageService | None:
             access_key_id,
             secret_access_key,
             ttl,
+            max_pool,
+            existence_ttl,
         )
 
     except Exception as e:

@@ -77,6 +77,26 @@ export function UserListPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {user.role === 'admin' && (
+                    <label
+                      className="flex items-center gap-1.5 text-sm text-gray-600 mr-1 select-none cursor-pointer"
+                      title="Email this admin when the server logs a warning or error"
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        checked={user.receive_notifications ?? false}
+                        disabled={patchUser.isPending}
+                        onChange={(e) =>
+                          patchUser.mutate({
+                            id: user.id,
+                            data: { receive_notifications: e.target.checked },
+                          })
+                        }
+                      />
+                      Email alerts
+                    </label>
+                  )}
                   <Button
                     variant="secondary"
                     size="sm"

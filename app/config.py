@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     b2_secret_access_key: str | None = None
     b2_signed_url_ttl_seconds: int = 3600
     b2_reconcile_interval_hours: int = 6
+    b2_max_pool_connections: int = 50
+    b2_existence_cache_ttl_seconds: int = 300
 
     model_config = SettingsConfigDict(
         env_file=".env",
