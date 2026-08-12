@@ -1,9 +1,9 @@
 """API v2 routes for Audible account management."""
 
-import secrets
-from typing import Dict
+from datetime import datetime, timedelta
 
 from audible import Authenticator
+from jose import JWTError, jwt
 from audible.localization import Locale
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
@@ -16,8 +16,12 @@ from ...services.background_jobs import BackgroundJobService
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
 
-# Temporary storage for OAuth login sessions
-_login_sessions: Dict[str, dict] = {}
+# OAuth login sessions are carried in a signed, short-lived token rather than in
+# process memory: the app runs under several gunicorn workers, so the worker that
+# handles /login/complete is usually not the one that handled /login/generate-url.
+# Generous expiry: the usual flow is to send the login URL to the account's owner
+# and wait for them to send the redirect URL back, which can take hours.
+LOGIN_SESSION_EXPIRE_MINUTES = 60 * 24 * 7
 
 
 def _account_to_dict(account: AudibleAccount) -> dict:
@@ -220,8 +224,6 @@ async def generate_login_url(
     marketplace = body.get("marketplace", "us")
     with_username = body.get("with_username", False)
 
-    session_id = secrets.token_urlsafe(32)
-
     from audible.login import build_oauth_url, create_code_verifier
 
     locale = Locale(marketplace)
@@ -235,13 +237,18 @@ async def generate_login_url(
         with_username=with_username,
     )
 
-    _login_sessions[session_id] = {
-        "code_verifier": code_verifier,
-        "serial": serial,
-        "marketplace": marketplace,
-        "with_username": with_username,
-        "domain": locale.domain,
-    }
+    session_id = jwt.encode(
+        {
+            "code_verifier": code_verifier.decode() if isinstance(code_verifier, bytes) else code_verifier,
+            "serial": serial,
+            "marketplace": marketplace,
+            "with_username": with_username,
+            "domain": locale.domain,
+            "exp": datetime.utcnow() + timedelta(minutes=LOGIN_SESSION_EXPIRE_MINUTES),
+        },
+        settings.secret_key,
+        algorithm="HS256",
+    )
 
     return {"session_id": session_id, "oauth_url": oauth_url}
 
@@ -256,16 +263,23 @@ async def complete_login(
     session_id = body.get("session_id")
     redirect_url = body.get("redirect_url")
 
-    session_data = _login_sessions.get(session_id)
-    if not session_data:
+    try:
+        session_data = jwt.decode(session_id, settings.secret_key, algorithms=["HS256"])
+    except JWTError:
         raise HTTPException(status_code=400, detail="Invalid or expired session")
 
     from urllib.parse import parse_qs, urlparse
-    parsed = urlparse(redirect_url)
+    parsed = urlparse((redirect_url or "").strip())
     query_params = parse_qs(parsed.query)
 
     if "openid.oa2.authorization_code" not in query_params:
-        raise HTTPException(status_code=400, detail="Invalid redirect URL")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid redirect URL: no openid.oa2.authorization_code found. "
+                "Copy the full URL of the page you land on after signing in."
+            ),
+        )
 
     authorization_code = query_params["openid.oa2.authorization_code"][0]
 
@@ -273,7 +287,7 @@ async def complete_login(
 
     register_data = register(
         authorization_code=authorization_code,
-        code_verifier=session_data["code_verifier"],
+        code_verifier=session_data["code_verifier"].encode(),
         domain=session_data["domain"],
         serial=session_data["serial"],
         with_username=session_data["with_username"],
@@ -305,7 +319,5 @@ async def complete_login(
     )
     db.add(account)
     db.commit()
-
-    del _login_sessions[session_id]
 
     return {"success": True, "username": username}
