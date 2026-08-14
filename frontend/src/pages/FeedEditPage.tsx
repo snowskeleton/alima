@@ -5,7 +5,12 @@ import { apiFetch } from '../api/client';
 import { PageSpinner } from '../components/ui/Spinner';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { Select } from '../components/ui/Select';
+import {
+  FeedFilterEditor,
+  parseFilterCriteria,
+  serializeFilters,
+  type FeedFilter,
+} from '../components/feeds/FeedFilterEditor';
 import { Alert } from '../components/ui/Alert';
 
 export function FeedEditPage() {
@@ -16,8 +21,7 @@ export function FeedEditPage() {
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [filterType, setFilterType] = useState('');
-  const [filterValue, setFilterValue] = useState('');
+  const [filters, setFilters] = useState<FeedFilter[]>([]);
   const [isPublic, setIsPublic] = useState(true);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
@@ -29,10 +33,7 @@ export function FeedEditPage() {
       setName(feed.name);
       setDescription(feed.description || '');
       setIsPublic(feed.is_public);
-      const criteria = feed.filter_criteria as { filters?: { type: string; value: string }[] } | null;
-      const firstFilter = criteria?.filters?.[0];
-      setFilterType(firstFilter?.type ?? '');
-      setFilterValue(firstFilter?.value ?? '');
+      setFilters(parseFilterCriteria(feed.filter_criteria));
     }
   }, [feed]);
 
@@ -68,11 +69,7 @@ export function FeedEditPage() {
     formData.append('is_public', String(isPublic));
 
     if (feed.feed_type === 'smart') {
-      if (filterType && filterValue) {
-        formData.append('filters_json', JSON.stringify([{ type: filterType, value: filterValue }]));
-      } else {
-        formData.append('filters_json', JSON.stringify([]));
-      }
+      formData.append('filters_json', serializeFilters(filters));
     }
 
     if (coverFile) {
@@ -102,29 +99,7 @@ export function FeedEditPage() {
         <Input label="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
 
         {feed.feed_type === 'smart' && (
-          <div className="space-y-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
-            <p className="text-xs text-gray-500">Smart feed filter — books matching this are included automatically.</p>
-            <Select
-              label="Filter by"
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
-              options={[
-                { value: '', label: 'All books (no filter)' },
-                { value: 'author', label: 'Author' },
-                { value: 'series', label: 'Series' },
-                { value: 'narrator', label: 'Narrator' },
-                { value: 'genre', label: 'Genre' },
-              ]}
-            />
-            {filterType && (
-              <Input
-                label="Filter value"
-                value={filterValue}
-                onChange={(e) => setFilterValue(e.target.value)}
-                placeholder="e.g. Brandon Sanderson"
-              />
-            )}
-          </div>
+          <FeedFilterEditor filters={filters} onChange={setFilters} />
         )}
 
         {/* Cover image */}

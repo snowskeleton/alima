@@ -4,14 +4,18 @@ import { apiFetch } from '../api/client';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
+import {
+  FeedFilterEditor,
+  serializeFilters,
+  type FeedFilter,
+} from '../components/feeds/FeedFilterEditor';
 
 export function FeedCreatePage() {
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [feedType, setFeedType] = useState('smart');
-  const [filterType, setFilterType] = useState('');
-  const [filterValue, setFilterValue] = useState('');
+  const [filters, setFilters] = useState<FeedFilter[]>([]);
   const [isPublic, setIsPublic] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -25,8 +29,8 @@ export function FeedCreatePage() {
     formData.append('feed_type', feedType);
     formData.append('is_public', String(isPublic));
 
-    if (feedType === 'smart' && filterType && filterValue) {
-      formData.append('filters_json', JSON.stringify([{ type: filterType, value: filterValue }]));
+    if (feedType === 'smart') {
+      formData.append('filters_json', serializeFilters(filters));
     }
 
     try {
@@ -59,29 +63,7 @@ export function FeedCreatePage() {
         />
 
         {feedType === 'smart' && (
-          <div className="space-y-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
-            <p className="text-xs text-gray-500">Smart feeds automatically include books matching a filter.</p>
-            <Select
-              label="Filter by"
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
-              options={[
-                { value: '', label: 'All books (no filter)' },
-                { value: 'author', label: 'Author' },
-                { value: 'series', label: 'Series' },
-                { value: 'narrator', label: 'Narrator' },
-                { value: 'genre', label: 'Genre' },
-              ]}
-            />
-            {filterType && (
-              <Input
-                label="Filter value"
-                value={filterValue}
-                onChange={(e) => setFilterValue(e.target.value)}
-                placeholder="e.g. Brandon Sanderson"
-              />
-            )}
-          </div>
+          <FeedFilterEditor filters={filters} onChange={setFilters} />
         )}
 
         <label className="flex items-center gap-2 text-sm">
