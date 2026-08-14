@@ -19,6 +19,7 @@ from ..models import (
     DownloadType,
     MetadataSource,
 )
+from ..utils.html_text import html_to_text
 
 logger = logging.getLogger(__name__)
 
@@ -434,7 +435,9 @@ class AudibleSyncService:
             series_position = series_info[0].get("sequence")
 
         # Other metadata
-        description = item.get("publisher_summary")
+        # publisher_summary is an HTML fragment; the UI renders descriptions as
+        # plain text, so flatten it to match imported books.
+        description = html_to_text(item.get("publisher_summary"))
         publisher = item.get("publisher_name")
 
         # Parse release date

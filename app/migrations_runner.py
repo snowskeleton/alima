@@ -901,6 +901,43 @@ def run_migration_017_add_b2_keys(db: Session, engine) -> None:
         raise
 
 
+def run_migration_018_strip_html_descriptions(db: Session, engine) -> None:
+    """Flatten HTML in book descriptions synced from Audible to plain text."""
+    migration_name = "018_strip_html_descriptions"
+
+    if has_migration_been_applied(db, migration_name):
+        return
+
+    logger.debug(f"Running migration: {migration_name}")
+
+    from .utils.html_text import html_to_text
+
+    try:
+        rows = db.execute(text(
+            "SELECT id, description FROM books "
+            "WHERE description IS NOT NULL AND description LIKE '%<%>%'"
+        )).fetchall()
+
+        updated = 0
+        for book_id, description in rows:
+            cleaned = html_to_text(description)
+            if cleaned != description:
+                db.execute(
+                    text("UPDATE books SET description = :d WHERE id = :id"),
+                    {"d": cleaned, "id": book_id},
+                )
+                updated += 1
+
+        db.commit()
+        mark_migration_applied(db, migration_name)
+        logger.info(f"Migration {migration_name} completed successfully! ({updated} descriptions cleaned)")
+
+    except Exception as e:
+        logger.error(f"Migration {migration_name} failed: {e}", exc_info=True)
+        db.rollback()
+        raise
+
+
 def run_all_pending_migrations(db: Session) -> None:
     """Run all pending migrations in order."""
     from .database import engine
@@ -922,6 +959,7 @@ def run_all_pending_migrations(db: Session) -> None:
         run_migration_015_magic_links,
         run_migration_016_create_api_keys,
         run_migration_017_add_b2_keys,
+        run_migration_018_strip_html_descriptions,
     ]
 
     for migration_func in migrations:
