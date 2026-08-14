@@ -167,84 +167,133 @@ class TestLastLogin:
 
 
 @pytest.mark.integration
-class TestAuthRoutes:
-    """Test authentication routes."""
+class TestAuthAPI:
+    """Test the /api/v2/auth endpoints backing the SPA."""
 
-    def test_login_page(self, client, test_user):
-        """Test login page is accessible."""
-        response = client.get("/auth/login")
+    def test_status_anonymous_with_users(self, client, test_user):
+        """An anonymous caller is reported as unauthenticated, not as a new install."""
+        data = client.get("/api/v2/auth/status").json()
+
+        assert data["authenticated"] is False
+        assert data["user"] is None
+        assert data["needs_registration"] is False
+
+    def test_status_empty_install_needs_registration(self, client):
+        """With no users at all, the SPA is told to show registration."""
+        data = client.get("/api/v2/auth/status").json()
+
+        assert data["authenticated"] is False
+        assert data["needs_registration"] is True
+
+    def test_status_authenticated(self, authenticated_client, test_user):
+        """A valid session reports the signed-in user."""
+        data = authenticated_client.get("/api/v2/auth/status").json()
+
+        assert data["authenticated"] is True
+        assert data["user"]["email"] == test_user.email
+        assert data["user"]["role"] == test_user.role.value
+
+    def test_login_sends_magic_link(self, client, test_db, test_user, mock_email_service):
+        """Logging in with a known address mails a magic link."""
+        from app.models import MagicLink
+
+        response = client.post("/api/v2/auth/login", json={"email": test_user.email})
+
         assert response.status_code == 200
-        assert b"Send me a login link" in response.content
-
-    def test_login_redirects_if_already_logged_in(self, authenticated_client):
-        """Test login page redirects if already logged in."""
-        response = authenticated_client.get("/auth/login", follow_redirects=False)
-        assert response.status_code == 303
-        assert response.headers["location"] == "/library"
-
-    def _get_csrf_token(self, client, url="/auth/login"):
-        """Helper to get a CSRF token by visiting a page first."""
-        response = client.get(url)
-        csrf_cookie = response.cookies.get("alima_csrf", "")
-        return csrf_cookie
-
-    def test_login_shows_check_email(self, client, test_user):
-        """Test submitting login shows check-email page."""
-        csrf = self._get_csrf_token(client)
-        response = client.post(
-            "/auth/login",
-            data={
-                "email": "test@example.com",
-            },
-            headers={"x-csrf-token": csrf},
+        assert response.json()["sent"] is True
+        mock_email_service["send_magic_link_email"].assert_called_once()
+        assert (
+            test_db.query(MagicLink).filter(MagicLink.email == test_user.email).count()
+            == 1
         )
-        assert response.status_code == 200
-        assert b"Check your email" in response.content
 
-    def test_login_nonexistent_email_still_shows_check_email(self, client, test_user):
-        """Test submitting nonexistent email still shows check-email (prevents enumeration)."""
-        csrf = self._get_csrf_token(client)
+    def test_login_unknown_email_does_not_leak(
+        self, client, test_db, test_user, mock_email_service
+    ):
+        """An unknown address gets the same response, but no link is issued."""
+        from app.models import MagicLink
+
         response = client.post(
-            "/auth/login",
-            data={
-                "email": "nonexistent@example.com",
-            },
-            headers={"x-csrf-token": csrf},
+            "/api/v2/auth/login", json={"email": "nobody@example.com"}
         )
-        assert response.status_code == 200
-        assert b"Check your email" in response.content
 
-    def test_magic_link_login(self, client, test_db, test_user):
-        """Test magic link creates session."""
+        assert response.status_code == 200
+        assert response.json()["sent"] is True
+        mock_email_service["send_magic_link_email"].assert_not_called()
+        assert (
+            test_db.query(MagicLink)
+            .filter(MagicLink.email == "nobody@example.com")
+            .count()
+            == 0
+        )
+
+    def test_magic_link_starts_a_session(self, client, test_db, test_user):
+        """Following a valid magic link authenticates subsequent requests."""
         token = create_magic_link(test_db, test_user.email)
 
-        response = client.get(
-            f"/auth/magic-link?token={token}",
-            follow_redirects=False,
-        )
-        assert response.status_code == 303
-        assert "session_token" in response.cookies
+        response = client.get(f"/api/v2/auth/magic-link?token={token}")
 
-    def test_magic_link_expired(self, client, test_user):
-        """Test expired/invalid magic link shows error page."""
-        response = client.get("/auth/magic-link?token=invalid-token")
         assert response.status_code == 200
-        assert b"expired" in response.content.lower()
+        assert response.json()["user"]["email"] == test_user.email
+        assert client.cookies.get("session_token")
 
-    def test_logout(self, authenticated_client):
-        """Test logout."""
-        response = authenticated_client.get("/auth/logout", follow_redirects=False)
-        assert response.status_code == 303
-        assert response.headers["location"] == "/auth/login"
+        # The cookie the client kept is good enough to reach an authed route.
+        profile = client.get("/api/v2/auth/profile")
+        assert profile.status_code == 200
+        assert profile.json()["email"] == test_user.email
 
-    def test_profile_page_requires_auth(self, client, test_user):
-        """Test profile page requires authentication (redirects to login)."""
-        response = client.get("/auth/profile", follow_redirects=False)
+    def test_magic_link_invalid_token_rejected(self, client, test_user):
+        """A bad token neither authenticates nor 500s."""
+        response = client.get("/api/v2/auth/magic-link?token=not-a-real-token")
+
+        assert response.status_code == 400
+        assert response.json()["success"] is False
+        assert not client.cookies.get("session_token")
+
+    def test_logout_clears_session(self, authenticated_client):
+        """Logging out tells the browser to drop the session cookie."""
+        response = authenticated_client.post("/api/v2/auth/logout")
+
+        assert response.status_code == 200
+        set_cookie = response.headers["set-cookie"]
+        assert "session_token=" in set_cookie
+        assert "Max-Age=0" in set_cookie
+
+    def test_profile_requires_auth(self, client, test_user):
+        """Unauthenticated profile access is bounced to the login page."""
+        response = client.get("/api/v2/auth/profile", follow_redirects=False)
+
         assert response.status_code == 303
         assert "/auth/login" in response.headers["location"]
 
-    def test_profile_page_authenticated(self, authenticated_client, test_user):
-        """Test profile page with authenticated user."""
-        response = authenticated_client.get("/auth/profile")
+    def test_profile_returns_current_user(self, authenticated_client, test_user):
+        """The profile route describes the signed-in user."""
+        data = authenticated_client.get("/api/v2/auth/profile").json()
+
+        assert data["id"] == test_user.id
+        assert data["email"] == test_user.email
+        assert data["role"] == test_user.role.value
+
+
+@pytest.mark.integration
+class TestRegistration:
+    """First-run registration."""
+
+    def test_register_first_user_becomes_admin(self, client, test_db):
+        """The first account created on an empty install is an admin."""
+        response = client.post(
+            "/api/v2/auth/register", json={"email": "first@example.com"}
+        )
+
         assert response.status_code == 200
-        assert test_user.email.encode() in response.content
+        assert response.json()["user"]["role"] == "admin"
+        assert client.cookies.get("session_token")
+
+    def test_register_closed_once_a_user_exists(self, client, test_user):
+        """Registration is not an open door once the install has an owner."""
+        response = client.post(
+            "/api/v2/auth/register", json={"email": "second@example.com"}
+        )
+
+        assert response.status_code == 400
+        assert "error" in response.json()

@@ -174,7 +174,8 @@ class AudibleAccount(Base):
     # Relationships
     books: Mapped[list["Book"]] = relationship("Book", back_populates="audible_account")
     download_queue: Mapped[list["DownloadQueue"]] = relationship(
-        "DownloadQueue", back_populates="audible_account"
+        "DownloadQueue", back_populates="audible_account",
+        cascade="all, delete-orphan", passive_deletes=True,
     )
 
 
@@ -243,11 +244,16 @@ class Book(Base):
     audible_account: Mapped[Optional["AudibleAccount"]] = relationship(
         "AudibleAccount", back_populates="books"
     )
+    # cascade + passive_deletes: these children have NOT NULL FKs declared
+    # ON DELETE CASCADE. Without this, deleting the parent makes SQLAlchemy try
+    # to null the child's FK first, which the database rejects.
     feed_books: Mapped[list["FeedBook"]] = relationship(
-        "FeedBook", back_populates="book"
+        "FeedBook", back_populates="book",
+        cascade="all, delete-orphan", passive_deletes=True,
     )
     download_queue: Mapped[Optional["DownloadQueue"]] = relationship(
-        "DownloadQueue", back_populates="book"
+        "DownloadQueue", back_populates="book",
+        cascade="all, delete-orphan", passive_deletes=True,
     )
 
 
@@ -278,7 +284,10 @@ class Feed(Base):
 
     # Relationships
     user: Mapped[Optional["User"]] = relationship("User", back_populates="feeds")
-    feed_books: Mapped[list["FeedBook"]] = relationship("FeedBook", back_populates="feed")
+    feed_books: Mapped[list["FeedBook"]] = relationship(
+        "FeedBook", back_populates="feed",
+        cascade="all, delete-orphan", passive_deletes=True,
+    )
 
 
 class FeedBook(Base):

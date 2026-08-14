@@ -25,12 +25,21 @@ class TestHealthEndpoint:
 class TestRootEndpoint:
     """Test root endpoint."""
 
-    def test_root_endpoint(self, client: TestClient):
-        """Test root endpoint redirects to login page."""
+    def test_root_sends_a_fresh_install_to_registration(self, client: TestClient):
+        """With no users yet, the root points at first-run registration."""
         response = client.get("/", follow_redirects=False)
 
         assert response.status_code == 303
-        assert response.headers["location"] == "/auth/login"
+        assert response.headers["location"] == "/auth/register"
+
+    def test_root_sends_an_established_install_to_the_library(
+        self, client: TestClient, test_user
+    ):
+        """Once an account exists, the root points at the app itself."""
+        response = client.get("/", follow_redirects=False)
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/library"
 
 
 @pytest.mark.integration

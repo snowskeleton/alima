@@ -1,323 +1,288 @@
-"""Tests for security and performance improvements (Phase 1 & 2)."""
+"""Tests for security and performance hardening."""
+
+import asyncio
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import text
+from fastapi import HTTPException
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.main import app
-from app.models import Book, DownloadQueue, Feed, FeedBook, User, UserRole
+from app.models import Book, BookSource, Feed, FeedBook, FeedType, MetadataSource
 
 
 @pytest.mark.unit
 class TestSecretKeyValidation:
-    """Test SECRET_KEY validation at startup."""
+    """SECRET_KEY validation at startup."""
 
     def test_empty_secret_key_raises_error(self):
-        """Test that empty SECRET_KEY raises ValueError."""
         with pytest.raises(ValueError, match="SECRET_KEY must be at least 32 characters"):
             Settings(secret_key="")
 
     def test_short_secret_key_raises_error(self):
-        """Test that short SECRET_KEY raises ValueError."""
         with pytest.raises(ValueError, match="SECRET_KEY must be at least 32 characters"):
             Settings(secret_key="tooshort")
 
     def test_valid_secret_key_accepted(self):
-        """Test that valid SECRET_KEY is accepted."""
         valid_key = "a" * 32
         settings = Settings(secret_key=valid_key)
         assert settings.secret_key == valid_key
 
 
 @pytest.mark.integration
-class TestCSRFProtection:
-    """Test CSRF protection middleware."""
-
-    def test_csrf_middleware_active(self, client: TestClient):
-        """Test that CSRF middleware is active."""
-        # GET request should set CSRF cookie
-        response = client.get("/auth/login")
-        assert "alima_csrf" in response.cookies or response.status_code == 200
-
-    def test_csrf_required_for_post(self, client: TestClient):
-        """Test that POST requests require CSRF token."""
-        # POST without CSRF should fail (or redirect to login)
-        response = client.post(
-            "/auth/login",
-            data={"email": "test@example.com", "password": "password"},
-            follow_redirects=False
-        )
-        # Either CSRF error or redirect (both are OK for now)
-        assert response.status_code in [403, 303, 422]
-
-
-@pytest.mark.integration
 class TestRateLimiting:
-    """Test rate limiting on authentication endpoints."""
+    """Rate limiting on the login endpoint."""
 
-    def test_login_rate_limit(self, client: TestClient):
-        """Test that login endpoint has rate limiting."""
-        # Note: This test is limited - real rate limiting requires multiple requests
-        # Just verify the endpoint responds
-        response = client.post(
-            "/auth/login",
-            data={"email": "test@example.com", "password": "password"}
-        )
-        # Should respond (not 500 error from missing rate limiter)
-        assert response.status_code != 500
+    def test_login_is_rate_limited(self, client, test_user):
+        """Repeated login attempts from one address are eventually refused."""
+        from app.routers.api_v2.auth import limiter
+
+        limiter.reset()
+        try:
+            statuses = [
+                client.post(
+                    "/api/v2/auth/login", json={"email": test_user.email}
+                ).status_code
+                for _ in range(15)
+            ]
+        finally:
+            limiter.reset()
+
+        assert 200 in statuses, "the first attempts should be allowed through"
+        assert 429 in statuses, "sustained attempts should be throttled"
 
 
 @pytest.mark.unit
 class TestDatabaseIndexes:
-    """Test that database indexes are created."""
+    """Columns that carry the hot queries are indexed."""
 
-    def test_books_indexes_exist(self, db: Session):
-        """Test that book indexes exist."""
-        from app.database import engine
+    @pytest.mark.parametrize(
+        "table,column",
+        [
+            ("books", "asin"),
+            ("books", "source"),
+            ("books", "file_path"),
+            ("books", "audible_account_id"),
+            ("download_queue", "status"),
+            ("feeds", "slug"),
+            ("magic_links", "token"),
+        ],
+    )
+    def test_column_is_indexed(self, test_engine, table, column):
+        inspector = inspect(test_engine)
+        indexed = {
+            col
+            for index in inspector.get_indexes(table)
+            for col in index["column_names"]
+        }
+        # Unique constraints and primary keys index implicitly.
+        for constraint in [inspector.get_pk_constraint(table)]:
+            indexed.update(constraint.get("constrained_columns") or [])
+        for unique in inspector.get_unique_constraints(table):
+            indexed.update(unique.get("column_names") or [])
 
-        if engine.url.drivername.startswith("postgresql"):
-            # Check for indexes in PostgreSQL
-            result = db.execute(text("""
-                SELECT indexname FROM pg_indexes
-                WHERE tablename = 'books'
-                AND indexname IN (
-                    'idx_books_file_path',
-                    'idx_books_audible_account_id',
-                    'idx_books_source',
-                    'idx_books_synced_from_master'
-                )
-            """))
-            indexes = [row[0] for row in result.fetchall()]
-
-            # Should have all 4 indexes (or will be created by migration)
-            expected_indexes = {
-                'idx_books_file_path',
-                'idx_books_audible_account_id',
-                'idx_books_source',
-                'idx_books_synced_from_master'
-            }
-
-            # Allow for indexes not existing yet (they'll be added by migration)
-            # Just verify the query doesn't error
-            assert isinstance(indexes, list)
-
-    def test_download_queue_status_index_exists(self, db: Session):
-        """Test that download_queue.status index exists."""
-        from app.database import engine
-
-        if engine.url.drivername.startswith("postgresql"):
-            result = db.execute(text("""
-                SELECT indexname FROM pg_indexes
-                WHERE tablename = 'download_queue'
-                AND indexname = 'idx_download_queue_status'
-            """))
-            indexes = [row[0] for row in result.fetchall()]
-
-            # Allow for index not existing yet (will be added by migration)
-            assert isinstance(indexes, list)
+        assert column in indexed, f"{table}.{column} should be indexed"
 
 
 @pytest.mark.unit
 class TestForeignKeyCascades:
-    """Test foreign key cascade behavior."""
+    """Deleting a parent row does not leave orphans behind."""
 
-    def test_delete_user_does_not_break_magic_links(self, db: Session):
-        """Test that deleting a user does not break magic_links (they reference email, not FK)."""
-        from app.models import MagicLink
+    def test_feed_delete_declares_cascade(self, test_engine):
+        """The feed_books -> feeds FK is declared ON DELETE CASCADE."""
+        fks = inspect(test_engine).get_foreign_keys("feed_books")
+        feed_fk = next(fk for fk in fks if fk["referred_table"] == "feeds")
 
-        # Create test user
-        user = User(
-            email="cascade_test@example.com",
-            password_hash=None,
-            role=UserRole.ADMIN
-        )
-        db.add(user)
-        db.commit()
+        assert feed_fk["options"].get("ondelete") == "CASCADE"
 
-        # Create magic link for this user
-        magic_link = MagicLink(
-            email="cascade_test@example.com",
-            token="test_token_cascade",
-            expires_at="2099-01-01 00:00:00",
-        )
-        db.add(magic_link)
-        db.commit()
-
-        link_id = magic_link.id
-
-        # Delete user - magic link has no FK, so it should stay
-        db.delete(user)
-        db.commit()
-
-        result = db.query(MagicLink).filter(MagicLink.id == link_id).first()
-        assert result is not None
-
-    def test_delete_feed_cascades_to_feed_books(self, db: Session):
-        """Test that deleting a feed cascades to feed_books."""
-        from app.models import FeedType
-
-        # Create test feed
+    def test_delete_feed_removes_its_feed_books(self, test_db: Session):
         feed = Feed(
-            name="Test Feed for Cascade",
-            slug="test-cascade-feed",
+            name="Cascade Feed",
+            slug="cascade-feed",
             feed_type=FeedType.MANUAL,
-            is_public=True
+            is_public=True,
         )
-        db.add(feed)
-        db.commit()
+        book = Book(
+            asin="BCASCADE",
+            source=BookSource.AUDIBLE,
+            title="Cascade Book",
+            author="Author",
+            metadata_source=MetadataSource.AUDIBLE,
+        )
+        test_db.add_all([feed, book])
+        test_db.commit()
 
-        feed_id = feed.id
+        test_db.add(FeedBook(feed_id=feed.id, book_id=book.id))
+        test_db.commit()
 
-        # Delete feed
-        db.delete(feed)
-        db.commit()
+        test_db.delete(feed)
+        test_db.commit()
 
-        # FeedBooks should be deleted (CASCADE) or error if not set up yet
-        # Just verify the operation completes
-        result = db.query(Feed).filter(Feed.id == feed_id).first()
-        assert result is None
+        assert test_db.query(FeedBook).filter(FeedBook.feed_id == feed.id).count() == 0
+        # The book itself is shared content and must survive.
+        assert test_db.query(Book).filter(Book.id == book.id).first() is not None
+
+    def test_delete_user_keeps_their_magic_links(self, test_db: Session):
+        """Magic links key off email, not a user FK, so they are not cascaded away."""
+        from datetime import datetime, timedelta
+
+        from app.models import MagicLink, User, UserRole
+
+        user = User(email="cascade_test@example.com", role=UserRole.ADMIN)
+        test_db.add(user)
+        test_db.commit()
+
+        link = MagicLink(
+            email=user.email,
+            token="test_token_cascade",
+            expires_at=datetime.utcnow() + timedelta(minutes=15),
+        )
+        test_db.add(link)
+        test_db.commit()
+        link_id = link.id
+
+        test_db.delete(user)
+        test_db.commit()
+
+        assert test_db.query(MagicLink).filter(MagicLink.id == link_id).first() is not None
 
 
 @pytest.mark.unit
 class TestSettingsCache:
-    """Test centralized settings cache."""
+    """Centralized settings cache."""
 
-    def test_get_cached_setting_returns_default(self):
-        """Test that get_cached_setting returns default for missing key."""
+    def test_missing_key_falls_back_to_default(self):
         from app.utils.settings_cache import get_cached_setting
 
-        result = get_cached_setting("nonexistent_key", "default_value")
-        assert result == "default_value"
+        assert get_cached_setting("nonexistent_key", "default_value") == "default_value"
 
-    def test_get_cached_setting_type_conversion(self):
-        """Test that get_cached_setting converts types."""
+    def test_value_is_coerced_to_the_requested_type(self):
         from app.utils.settings_cache import get_cached_setting
 
-        # Integer conversion
         result = get_cached_setting("nonexistent_int", 42, int)
         assert result == 42
         assert isinstance(result, int)
 
-    def test_clear_settings_cache(self):
-        """Test that cache can be cleared."""
+    def test_cleared_cache_still_serves_values(self):
         from app.utils.settings_cache import clear_settings_cache, get_cached_setting
 
-        # Get a value to populate cache
         get_cached_setting("test_key", "value")
-
-        # Clear cache
         clear_settings_cache()
 
-        # Cache should be empty (no error on clear)
-        assert True
+        assert get_cached_setting("test_key", "value") == "value"
 
 
 @pytest.mark.unit
 class TestSessionExpiration:
-    """Test session expiration helper function."""
+    """Session lifetime comes from settings with a usable fallback."""
 
-    def test_get_session_expiration_hours_returns_default(self):
-        """Test that session expiration returns default."""
-        from app.routers.auth import get_session_expiration_hours
+    def test_expiration_falls_back_to_a_week(self):
+        from app.routers.api_v2.auth import _get_session_expiration_hours
 
-        result = get_session_expiration_hours()
-
-        # Should return default (168 hours = 7 days)
-        assert isinstance(result, int)
-        assert result > 0
+        assert _get_session_expiration_hours() == 168
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestPathTraversalProtection:
-    """Test path traversal protection in file serving."""
+    """File serving refuses to escape its base directory."""
 
-    def test_audiobook_serving_validates_path(self, client: TestClient, db: Session):
-        """Test that audiobook serving validates file paths."""
-        # Create test book with suspicious path
+    def test_cover_path_cannot_escape_covers_dir(self):
+        from app.routers.files import serve_cover
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(serve_cover("../../../../etc/passwd"))
+
+        assert exc_info.value.status_code in (400, 403)
+
+    def test_legitimate_cover_subdirectory_is_allowed(self, tmp_path, monkeypatch):
+        """Nested cover paths (e.g. feeds/<uuid>.jpg) still resolve."""
+        from app.config import settings
+        from app.routers.files import serve_cover
+
+        monkeypatch.setattr(settings, "covers_path", tmp_path)
+        nested = tmp_path / "feeds"
+        nested.mkdir()
+        (nested / "cover.jpg").write_bytes(b"not-really-a-jpeg")
+
+        response = asyncio.run(serve_cover("feeds/cover.jpg"))
+
+        assert response.media_type == "image/jpeg"
+
+    def test_audiobook_with_a_traversing_path_is_not_served(
+        self, client, test_db: Session
+    ):
         book = Book(
-            title="Test Book",
-            source="AUDIBLE",
-            file_path="../../../etc/passwd"  # Path traversal attempt
+            asin="BTRAVERSE",
+            source=BookSource.AUDIBLE,
+            title="Traversal Book",
+            author="Author",
+            metadata_source=MetadataSource.AUDIBLE,
+            file_path="../../../../etc/passwd",
         )
-        db.add(book)
-        db.commit()
+        test_db.add(book)
+        test_db.commit()
 
-        # Try to access the file
         response = client.get(f"/files/audiobooks/{book.id}.m4b")
 
-        # Should either reject (403) or not find file (404), not serve it
-        assert response.status_code in [403, 404, 400]
-
-    def test_cover_serving_validates_path(self, client: TestClient):
-        """Test that cover serving validates file paths."""
-        # Try path traversal in cover path
-        response = client.get("/files/covers/../../../../../../etc/passwd")
-
-        # Should reject path traversal
-        assert response.status_code in [403, 404, 400]
+        assert response.status_code in (400, 403, 404)
+        assert b"root:" not in response.content
 
 
 @pytest.mark.integration
-class TestN1QueryFix:
-    """Test N+1 query fixes with eager loading."""
+class TestRSSFeedQueryCount:
+    """Feed rendering must not issue a query per book."""
 
-    def test_rss_feed_uses_eager_loading(self, db: Session, client: TestClient):
-        """Test that RSS feed generation uses eager loading."""
-        from app.models import FeedType
-
-        # Create test feed
+    def _make_feed_with_books(self, test_db: Session, slug: str, count: int) -> Feed:
         feed = Feed(
-            name="Test RSS Feed",
-            slug="test-rss-n1",
+            name=f"Feed {slug}",
+            slug=slug,
             feed_type=FeedType.MANUAL,
-            is_public=True
+            is_public=True,
         )
-        db.add(feed)
-        db.commit()
+        test_db.add(feed)
+        test_db.commit()
 
-        # Access RSS feed
-        response = client.get(f"/feeds/{feed.slug}.xml")
+        for i in range(count):
+            book = Book(
+                asin=f"{slug}-{i}",
+                source=BookSource.AUDIBLE,
+                title=f"Book {i}",
+                author="Author",
+                metadata_source=MetadataSource.AUDIBLE,
+                file_path=f"audiobooks/{slug}-{i}.m4b",
+                file_size=1024,
+                file_format="m4b",
+            )
+            test_db.add(book)
+            test_db.commit()
+            test_db.add(FeedBook(feed_id=feed.id, book_id=book.id, position=i))
+        test_db.commit()
+        return feed
 
-        # Should complete without N+1 query issues (no error)
-        # If eager loading is missing, this might be slower but won't error
-        assert response.status_code in [200, 404]
+    def test_query_count_does_not_grow_with_the_feed(
+        self, client, test_db: Session, test_engine
+    ):
+        from sqlalchemy import event
 
+        small = self._make_feed_with_books(test_db, "n1-small", 2)
+        large = self._make_feed_with_books(test_db, "n1-large", 12)
 
-@pytest.mark.integration
-class TestMigration013:
-    """Test migration 013 (indexes and cascades)."""
+        counts = {}
 
-    def test_migration_is_idempotent(self, db: Session):
-        """Test that migration 013 can run multiple times."""
-        from app.database import engine
-        from app.migrations_runner import run_migration_013_add_indexes_and_cascades
+        for slug in (small.slug, large.slug):
+            statements = []
 
-        # Run migration
-        try:
-            run_migration_013_add_indexes_and_cascades(db, engine)
-            # Should complete without error
-            assert True
-        except Exception as e:
-            # If already applied, that's OK
-            if "already applied" in str(e).lower():
-                assert True
-            else:
-                pytest.fail(f"Migration failed: {e}")
+            def record(conn, cursor, statement, params, context, executemany):
+                statements.append(statement)
 
-    def test_migration_creates_indexes(self, db: Session):
-        """Test that migration creates expected indexes."""
-        from app.database import engine
+            event.listen(test_engine, "before_cursor_execute", record)
+            try:
+                response = client.get(f"/feeds/{slug}.xml")
+            finally:
+                event.remove(test_engine, "before_cursor_execute", record)
 
-        if engine.url.drivername.startswith("postgresql"):
-            # Check for at least one index
-            result = db.execute(text("""
-                SELECT COUNT(*) FROM pg_indexes
-                WHERE tablename IN ('books', 'download_queue')
-                AND indexname LIKE 'idx_%'
-            """))
-            count = result.scalar()
+            assert response.status_code == 200
+            counts[slug] = len(statements)
 
-            # Should have created some indexes (or they exist from before)
-            assert count >= 0  # Just verify query works
+        # Six times the books should not mean six times the queries.
+        assert counts[large.slug] <= counts[small.slug] + 2, counts

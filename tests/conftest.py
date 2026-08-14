@@ -14,7 +14,7 @@ os.environ["SMTP_FROM"] = ""
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base, get_db
@@ -34,6 +34,16 @@ def test_engine():
         TEST_DATABASE_URL,
         connect_args={"check_same_thread": False, "uri": True},
     )
+
+    # SQLite ignores foreign keys unless asked. Production runs PostgreSQL, which
+    # always enforces them, so turn them on here to keep the test database honest
+    # about ON DELETE CASCADE.
+    @event.listens_for(engine, "connect")
+    def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     Base.metadata.create_all(bind=engine)
     yield engine
     Base.metadata.drop_all(bind=engine)
