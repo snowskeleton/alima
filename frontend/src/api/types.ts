@@ -63,6 +63,15 @@ export interface DownloadQueueEntry {
   download_type: string;
   status: string;
   stalled: boolean;
+  /** Bytes transferred so far: downloaded while downloading, decrypted while decrypting. */
+  bytes_downloaded: number | null;
+  /** Expected total for the current phase, when the server reports one. */
+  total_bytes: number | null;
+  progress_at: string | null;
+  /** Seconds since the byte count last moved; null unless in flight. */
+  idle_seconds: number | null;
+  /** Rough seconds remaining, from the average rate so far. Null when not computable. */
+  eta_seconds: number | null;
   priority: number;
   error_message: string | null;
   attempts: number;

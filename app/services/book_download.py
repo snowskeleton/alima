@@ -1,13 +1,16 @@
 """Service for downloading and decrypting books from Audible."""
 
+import inspect
 import json
 import logging
 import datetime
 import shutil
+import threading
+import time
 # from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import audible
 import httpx
@@ -30,11 +33,34 @@ IN_FLIGHT_STATUSES = [
 # Statuses that block a book from being queued again.
 ACTIVE_STATUSES = [DownloadStatus.PENDING] + IN_FLIGHT_STATUSES
 
-# How long an entry may sit in DOWNLOADING/DECRYPTING before we assume the
-# worker that owned it is gone. Large books legitimately take a while, so this
-# is generous; the startup sweep catches the common case (process restart)
-# immediately regardless of age.
-DEFAULT_STALE_DOWNLOAD_MINUTES = 90
+# How long an in-flight entry may go without its byte count moving before we
+# assume the worker that owned it is gone. This measures progress, not age, so
+# it can be far tighter than a whole-transfer timeout: a slow book keeps
+# reporting bytes and is never reaped, however long it takes overall. Five
+# minutes of a completely motionless transfer is already well past anything a
+# healthy download does, and failing fast beats waiting.
+DEFAULT_STALE_DOWNLOAD_MINUTES = 5
+
+# Streamed to disk in chunks; also how often the progress callback fires.
+DOWNLOAD_CHUNK_BYTES = 1024 * 1024
+
+# Applies to connect/read/write individually, not the whole transfer, so a
+# large book is fine but a dead connection surfaces in minutes.
+DOWNLOAD_TIMEOUT = httpx.Timeout(30.0, read=120.0)
+
+# Floor between progress writes. Chunks arrive far faster than this and every
+# write is a DB commit the queue page then polls.
+PROGRESS_WRITE_INTERVAL_SECONDS = 5
+
+# How often the decrypt watchdog stats the output file for a size change.
+# Only used when snowcrypt can't report progress itself.
+DECRYPT_POLL_SECONDS = 5
+
+# snowcrypt gained progress_callback after 0.1.3. Detect rather than pin, so
+# this keeps working on either side of the upgrade.
+_SNOWCRYPT_REPORTS_PROGRESS = "progress_callback" in inspect.signature(
+    snowcrypt.decrypt_aaxc
+).parameters
 
 
 def _stale_download_minutes() -> int:
@@ -54,10 +80,70 @@ def _as_utc(value: Optional[datetime.datetime]) -> Optional[datetime.datetime]:
     return value
 
 
+def _describe_bytes(value: Optional[int]) -> str:
+    """Human-readable byte count for log lines and error messages."""
+    if not value:
+        return "0 bytes"
+    if value < 1024 * 1024:
+        return f"{value / 1024:.0f} KB"
+    if value < 1024 * 1024 * 1024:
+        return f"{value / (1024 * 1024):.0f} MB"
+    return f"{value / (1024 * 1024 * 1024):.2f} GB"
+
+
+def entry_eta_seconds(entry: DownloadQueue) -> Optional[int]:
+    """
+    Rough seconds remaining for an in-flight entry, from the average rate so
+    far. None when there isn't enough to compute one.
+
+    Deliberately naive: a flat average over the whole phase, no smoothing. It
+    answers "roughly how long?" and will be wrong whenever the rate changes,
+    which is fine — it is not a promise, and the byte counter next to it is the
+    honest signal.
+    """
+    if entry.status not in IN_FLIGHT_STATUSES:
+        return None
+
+    done = entry.bytes_downloaded
+    total = entry.total_bytes
+    started = _as_utc(entry.phase_started_at) or _as_utc(entry.started_at)
+    if not done or not total or started is None or done >= total:
+        return None
+
+    elapsed = (datetime.datetime.now(datetime.timezone.utc) - started).total_seconds()
+    # Under a few seconds the rate estimate is mostly noise.
+    if elapsed < 5:
+        return None
+
+    rate = done / elapsed
+    if rate <= 0:
+        return None
+
+    return int((total - done) / rate)
+
+
+def entry_idle_for(entry: DownloadQueue) -> Optional[datetime.timedelta]:
+    """
+    How long since this entry last showed signs of life, or None if it never
+    showed any (in flight with no started_at, which is inconsistent by
+    definition and treated as stale).
+
+    Liveness is progress_at when the worker has reported bytes, falling back to
+    started_at for an entry that hasn't reported its first chunk yet.
+    """
+    last_seen = _as_utc(entry.progress_at) or _as_utc(entry.started_at)
+    if last_seen is None:
+        return None
+    return datetime.datetime.now(datetime.timezone.utc) - last_seen
+
+
 def is_entry_stale(entry: DownloadQueue, stale_minutes: Optional[int] = None) -> bool:
     """
-    True if the entry claims to be in flight but nothing has touched it in a
-    long time — the worker died, the process restarted, or a decrypt hung.
+    True if the entry claims to be in flight but hasn't moved a byte in a long
+    time — the worker died, the process restarted, or a decrypt hung.
+
+    Note this is *not* a duration cap. An entry that keeps reporting progress
+    stays alive indefinitely; only a stalled one is reaped.
     """
     if entry.status not in IN_FLIGHT_STATUSES:
         return False
@@ -65,13 +151,93 @@ def is_entry_stale(entry: DownloadQueue, stale_minutes: Optional[int] = None) ->
     if stale_minutes is None:
         stale_minutes = _stale_download_minutes()
 
-    # An in-flight entry with no started_at is inconsistent by definition.
-    started = _as_utc(entry.started_at)
-    if started is None:
+    idle = entry_idle_for(entry)
+    if idle is None:
         return True
 
-    age = datetime.datetime.now(datetime.timezone.utc) - started
-    return age > datetime.timedelta(minutes=stale_minutes)
+    return idle > datetime.timedelta(minutes=stale_minutes)
+
+
+class _ProgressReporter:
+    """
+    Persists "this entry is still moving" for an in-flight download.
+
+    Writes go through a dedicated short-lived session rather than the worker's,
+    so this is safe to call from the decrypt watchdog thread and can't disturb
+    whatever transaction the worker has open. Writes are throttled: chunks
+    arrive far more often than the queue page is polled, and every write is a
+    commit.
+    """
+
+    def __init__(self, queue_entry_id: int):
+        self.queue_entry_id = queue_entry_id
+        self._last_written_at = 0.0
+        self._last_value = -1
+
+    def report(self, value: int, total: Optional[int] = None, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force:
+            if value == self._last_value:
+                return
+            if now - self._last_written_at < PROGRESS_WRITE_INTERVAL_SECONDS:
+                return
+
+        self._last_written_at = now
+        self._last_value = value
+
+        db = SessionLocal()
+        try:
+            values = {
+                "bytes_downloaded": value,
+                "progress_at": datetime.datetime.now(datetime.timezone.utc),
+            }
+            if total is not None:
+                values["total_bytes"] = total
+            db.query(DownloadQueue).filter(
+                DownloadQueue.id == self.queue_entry_id
+            ).update(values, synchronize_session=False)
+            db.commit()
+        except Exception as e:
+            # Progress is advisory. Losing a heartbeat write is survivable;
+            # failing the download over it is not.
+            logger.debug(f"Could not record progress for queue {self.queue_entry_id}: {e}")
+            db.rollback()
+        finally:
+            db.close()
+
+
+class _DecryptWatchdog:
+    """
+    Reports decrypt progress by watching the output file grow.
+
+    snowcrypt offers no progress callback and isn't ours to change, but it
+    writes the decrypted stream incrementally, so the output file's size is an
+    honest liveness signal. Runs as a daemon thread for the duration of the
+    decrypt.
+    """
+
+    def __init__(self, queue_entry_id: int, output_path: Path):
+        self.output_path = output_path
+        self.reporter = _ProgressReporter(queue_entry_id)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        while not self._stop.wait(DECRYPT_POLL_SECONDS):
+            try:
+                size = self.output_path.stat().st_size
+            except OSError:
+                # Not created yet, or already moved. Either way, nothing to say.
+                continue
+            self.reporter.report(size)
+
+    def __enter__(self) -> "_DecryptWatchdog":
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self._stop.set()
+        self._thread.join(timeout=DECRYPT_POLL_SECONDS + 1)
 
 
 class BookDownloadService:
@@ -113,32 +279,41 @@ class BookDownloadService:
             if not ignore_age and not is_entry_stale(entry, stale_minutes):
                 continue
 
-            started = _as_utc(entry.started_at)
-            stuck_for = (
-                datetime.datetime.now(datetime.timezone.utc) - started
-                if started
-                else None
+            idle = entry_idle_for(entry)
+            idle_desc = (
+                f"idle {int(idle.total_seconds() // 60)}m" if idle else "never reported progress"
             )
-            stuck_desc = f"{int(stuck_for.total_seconds() // 60)}m" if stuck_for else "unknown duration"
+            got = _describe_bytes(entry.bytes_downloaded)
             was = entry.status.value
+
+            # A process that died holding this entry never got to try, so it
+            # shouldn't spend one of the book's attempts — otherwise a restart
+            # loop burns through all of them in minutes and permanently fails a
+            # book that was downloading fine. Refund it.
+            if ignore_age and entry.attempts > 0:
+                entry.attempts -= 1
 
             if entry.attempts < max_attempts:
                 entry.status = DownloadStatus.PENDING
                 entry.error_message = (
-                    f"Recovered: stuck in {was} for {stuck_desc}, re-queued automatically"
+                    f"Recovered: {was} stalled at {got} ({idle_desc}), re-queued automatically"
                 )
                 entry.started_at = None
+                entry.progress_at = None
+                entry.phase_started_at = None
+                entry.bytes_downloaded = None
+                entry.total_bytes = None
                 stats["requeued"] += 1
             else:
                 entry.status = DownloadStatus.FAILED
                 entry.error_message = (
-                    f"Stuck in {was} for {stuck_desc} after {entry.attempts} attempts"
+                    f"Stalled in {was} at {got} ({idle_desc}) after {entry.attempts} attempts"
                 )
                 stats["failed"] += 1
 
             logger.warning(
                 f"Reaped stale download entry {entry.id} ({entry.asin}): "
-                f"{was} for {stuck_desc} -> {entry.status.value}"
+                f"{was} at {got}, {idle_desc} -> {entry.status.value}"
             )
 
         if stats["requeued"] or stats["failed"]:
@@ -288,6 +463,12 @@ class BookDownloadService:
         queue_entry.status = DownloadStatus.DOWNLOADING
         queue_entry.started_at = datetime.datetime.now(datetime.timezone.utc)
         queue_entry.attempts += 1
+        # Start from zero so a retry doesn't inherit the previous attempt's
+        # byte count and look like it's already partway through.
+        queue_entry.bytes_downloaded = 0
+        queue_entry.total_bytes = None
+        queue_entry.progress_at = queue_entry.started_at
+        queue_entry.phase_started_at = queue_entry.started_at
         self.db.commit()
 
         try:
@@ -406,7 +587,21 @@ class BookDownloadService:
             voucher_file = temp_dir / f"{queue_entry.asin}.voucher"
 
             logger.debug(f"Downloading encrypted .aaxc file for '{book.title}' ({queue_entry.asin})")
-            self._download_file(download_url, aaxc_file, client)
+            # The license round-trip happens with the entry already marked
+            # DOWNLOADING but before a single byte moves. On a slow day that
+            # silence could outlast the staleness threshold and get a perfectly
+            # healthy worker reaped, so mark the handover explicitly.
+            # Time the transfer from here too, so the rate isn't diluted by
+            # however long the license took.
+            queue_entry.phase_started_at = datetime.datetime.now(datetime.timezone.utc)
+            self.db.commit()
+
+            progress = _ProgressReporter(queue_entry.id)
+            progress.report(0, force=True)
+
+            self._download_file(
+                download_url, aaxc_file, client, progress_callback=progress.report
+            )
             logger.debug(f"Downloaded encrypted file for '{book.title}' ({aaxc_file.stat().st_size} bytes)")
 
             # Get and save voucher
@@ -417,6 +612,12 @@ class BookDownloadService:
             # Decrypt to .m4a
             logger.debug(f"Starting decryption for '{book.title}' ({queue_entry.asin})")
             queue_entry.status = DownloadStatus.DECRYPTING
+            # Restart the counter: from here it measures bytes decrypted, and
+            # the transition itself is a fresh sign of life.
+            queue_entry.bytes_downloaded = 0
+            queue_entry.total_bytes = aaxc_file.stat().st_size
+            queue_entry.progress_at = datetime.datetime.now(datetime.timezone.utc)
+            queue_entry.phase_started_at = queue_entry.progress_at
             self.db.commit()
 
             # Create filename: sanitized title
@@ -436,12 +637,14 @@ class BookDownloadService:
 
             logger.debug(f"Decrypting {queue_entry.asin} to temporary location: {temp_output_file}")
 
-            # Decrypt using snowcrypt to temp location
-            snowcrypt.decrypt_aaxc(
-                str(aaxc_file),
-                str(temp_output_file),
+            # Decrypt using snowcrypt to temp location, reporting progress so a
+            # long decrypt reads as alive rather than stalled.
+            self._decrypt_with_progress(
+                queue_entry,
+                aaxc_file,
+                temp_output_file,
                 voucher_dict["key"],
-                voucher_dict["iv"]
+                voucher_dict["iv"],
             )
             logger.debug(f"Successfully decrypted '{book.title}' ({temp_output_file.stat().st_size} bytes)")
 
@@ -556,6 +759,12 @@ class BookDownloadService:
         queue_entry.status = DownloadStatus.DOWNLOADING
         queue_entry.started_at = datetime.datetime.now(datetime.timezone.utc)
         queue_entry.attempts += 1
+        # Start from zero so a retry doesn't inherit the previous attempt's
+        # byte count and look like it's already partway through.
+        queue_entry.bytes_downloaded = 0
+        queue_entry.total_bytes = None
+        queue_entry.progress_at = queue_entry.started_at
+        queue_entry.phase_started_at = queue_entry.started_at
         self.db.commit()
 
         try:
@@ -693,14 +902,61 @@ class BookDownloadService:
 
             raise
 
-    def _download_file(self, url: str, output_path: Path, audible_client=None) -> None:
+    def _decrypt_with_progress(
+        self,
+        queue_entry: DownloadQueue,
+        aaxc_file: Path,
+        output_file: Path,
+        key: str,
+        iv: str,
+    ) -> None:
         """
-        Download a file from URL to local path.
+        Decrypt, reporting bytes written as it goes.
+
+        Prefers snowcrypt's own progress callback, which reports exactly what
+        it has written. Older snowcrypt releases don't have it, so fall back to
+        a watchdog thread that watches the output file grow — a coarser signal,
+        but enough to tell moving from wedged.
+        """
+        progress = _ProgressReporter(queue_entry.id)
+
+        if _SNOWCRYPT_REPORTS_PROGRESS:
+            snowcrypt.decrypt_aaxc(
+                str(aaxc_file),
+                str(output_file),
+                key,
+                iv,
+                progress_callback=lambda written, total: progress.report(written, total),
+            )
+            return
+
+        logger.debug(
+            "snowcrypt has no progress_callback; falling back to output-size watchdog"
+        )
+        with _DecryptWatchdog(queue_entry.id, output_file):
+            snowcrypt.decrypt_aaxc(str(aaxc_file), str(output_file), key, iv)
+
+    def _download_file(
+        self,
+        url: str,
+        output_path: Path,
+        audible_client=None,
+        progress_callback: Optional[Callable[[int, Optional[int]], None]] = None,
+    ) -> None:
+        """
+        Stream a file from URL to local path.
+
+        The body is streamed to disk a chunk at a time rather than buffered:
+        an audiobook is routinely over a gigabyte, and holding one (let alone
+        two concurrently) in memory is what got workers OOM-killed.
 
         Args:
             url: URL to download from
             output_path: Local path to save file
             audible_client: Optional audible.Client instance for authenticated downloads
+            progress_callback: Called with (bytes_written, total_bytes_or_None)
+                as the transfer advances. Total comes from Content-Length and
+                is None when the server doesn't send one.
         """
         logger.debug(f"Downloading from {url[:80]}...")
 
@@ -709,35 +965,53 @@ class BookDownloadService:
         is_cloudfront = "cloudfront.net" in url.lower()
 
         if audible_client and not is_cloudfront:
-            # Use authenticated client for non-CloudFront Audible API URLs
-            response = audible_client.raw_request(
+            # Use authenticated client for non-CloudFront Audible API URLs.
+            # stream=True returns a context manager wrapping httpx's own
+            # stream(), with the auth flow and cookies already applied.
+            stream_ctx = audible_client.raw_request(
                 "GET",
                 url,
+                stream=True,
                 apply_cookies=True,
                 apply_auth_flow=True,
-                follow_redirects=True
+                follow_redirects=True,
+                timeout=DOWNLOAD_TIMEOUT,
             )
         elif is_cloudfront:
             # Use plain httpx with Audible User-Agent for CloudFront CDN
             headers = {
                 "User-Agent": "Audible/671 CFNetwork/1240.0.4 Darwin/20.6.0"
             }
-            response = httpx.get(url, headers=headers, follow_redirects=True)
+            stream_ctx = httpx.stream(
+                "GET", url, headers=headers, follow_redirects=True,
+                timeout=DOWNLOAD_TIMEOUT,
+            )
         else:
             # Fallback for unauthenticated downloads
-            response = httpx.get(url, follow_redirects=True)
+            stream_ctx = httpx.stream(
+                "GET", url, follow_redirects=True, timeout=DOWNLOAD_TIMEOUT,
+            )
 
-        # Check response
-        if response.status_code != 200:
-            logger.error(f"Download failed with status {response.status_code}")
-            logger.error(f"Response body: {response.text[:500]}")
-            response.raise_for_status()
+        with stream_ctx as response:
+            if response.status_code != 200:
+                # The body hasn't been read yet on a streamed response.
+                response.read()
+                logger.error(f"Download failed with status {response.status_code}")
+                logger.error(f"Response body: {response.text[:500]}")
+                response.raise_for_status()
 
-        # Save file
-        file_size = len(response.content)
-        logger.debug(f"Downloaded {file_size} bytes to {output_path}")
-        with open(output_path, "wb") as f:
-            f.write(response.content)
+            total = response.headers.get("Content-Length")
+            total_bytes = int(total) if total and total.isdigit() else None
+
+            written = 0
+            with open(output_path, "wb") as f:
+                for chunk in response.iter_bytes(chunk_size=DOWNLOAD_CHUNK_BYTES):
+                    f.write(chunk)
+                    written += len(chunk)
+                    if progress_callback:
+                        progress_callback(written, total_bytes)
+
+        logger.debug(f"Downloaded {written} bytes to {output_path}")
 
     def _path_reserved(self, output_path: Path, exclude_book_id: int) -> bool:
         """True if another book already claims this path in the database."""

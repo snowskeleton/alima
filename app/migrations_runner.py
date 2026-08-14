@@ -938,6 +938,52 @@ def run_migration_018_strip_html_descriptions(db: Session, engine) -> None:
         raise
 
 
+def run_migration_019_add_download_progress(db: Session, engine) -> None:
+    """Add byte-progress tracking columns to the download queue."""
+    migration_name = "019_add_download_progress"
+
+    is_postgres = "postgresql" in str(engine.url)
+
+    column_exists = False
+    if is_postgres:
+        result = db.execute(text("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name='download_queue' AND column_name='progress_at'
+        """))
+        column_exists = result.fetchone() is not None
+    else:
+        result = db.execute(text("PRAGMA table_info(download_queue)"))
+        columns = [col[1] for col in result.fetchall()]
+        column_exists = "progress_at" in columns
+
+    if column_exists:
+        logger.debug("Download progress columns already exist, ensuring migration is marked as applied")
+        if not has_migration_been_applied(db, migration_name):
+            mark_migration_applied(db, migration_name)
+        return
+
+    if has_migration_been_applied(db, migration_name):
+        logger.warning(f"Migration {migration_name} was marked as applied but columns don't exist - re-running")
+        db.execute(text("DELETE FROM schema_migrations WHERE migration_name = :name"), {"name": migration_name})
+        db.commit()
+
+    logger.debug(f"Running migration: {migration_name}")
+
+    try:
+        db.execute(text("ALTER TABLE download_queue ADD COLUMN bytes_downloaded BIGINT"))
+        db.execute(text("ALTER TABLE download_queue ADD COLUMN total_bytes BIGINT"))
+        db.execute(text("ALTER TABLE download_queue ADD COLUMN progress_at TIMESTAMP"))
+        db.execute(text("ALTER TABLE download_queue ADD COLUMN phase_started_at TIMESTAMP"))
+        db.commit()
+        mark_migration_applied(db, migration_name)
+        logger.info(f"Migration {migration_name} completed successfully!")
+
+    except Exception as e:
+        logger.error(f"Migration {migration_name} failed: {e}", exc_info=True)
+        db.rollback()
+        raise
+
+
 def run_all_pending_migrations(db: Session) -> None:
     """Run all pending migrations in order."""
     from .database import engine
@@ -960,6 +1006,7 @@ def run_all_pending_migrations(db: Session) -> None:
         run_migration_016_create_api_keys,
         run_migration_017_add_b2_keys,
         run_migration_018_strip_html_descriptions,
+        run_migration_019_add_download_progress,
     ]
 
     for migration_func in migrations:

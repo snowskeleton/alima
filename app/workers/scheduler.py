@@ -241,14 +241,16 @@ def start_scheduler():
     # Sweep for downloads wedged in DOWNLOADING/DECRYPTING. process_queue()
     # reaps too, but only when it runs — this covers the case where the queue
     # is otherwise idle and nothing would trigger a reap.
+    # Runs well inside the staleness threshold: sweeping on the same period
+    # would double the worst-case time to notice a wedged download.
     scheduler.add_job(
         reap_stale_downloads,
-        trigger=IntervalTrigger(minutes=5),
+        trigger=IntervalTrigger(minutes=1),
         id="reap_stale_downloads",
         name="Recover stuck downloads",
         replace_existing=True,
     )
-    logger.debug("Scheduled stale download sweep to run every 5 minutes")
+    logger.debug("Scheduled stale download sweep to run every minute")
 
     # Add B2 upload sweep (no-op unless B2 is configured). Runs less often than
     # the download queue since uploads are large and not latency-sensitive.

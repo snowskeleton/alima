@@ -330,6 +330,18 @@ class DownloadQueue(Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    # Liveness signal for an in-flight entry. bytes_downloaded is the count the
+    # worker last reported (bytes written for a download, bytes decrypted for a
+    # decrypt); progress_at is when it last changed. Staleness is judged on
+    # progress_at, so a slow-but-moving transfer is never reaped.
+    bytes_downloaded: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    total_bytes: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    progress_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # When the *current* phase began. started_at marks the whole attempt and is
+    # what the duration metrics are built on, so rates for the decrypt phase
+    # need their own origin or they'd include the download time.
+    phase_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     # Download metrics (nullable since existing records won't have these)
     file_size_bytes: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

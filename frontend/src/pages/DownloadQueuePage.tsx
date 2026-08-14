@@ -9,6 +9,7 @@ import { Select } from '../components/ui/Select';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Alert } from '../components/ui/Alert';
 import { formatFileSize, formatDuration, timeAgo } from '../utils/format';
+import type { DownloadQueueEntry } from '../api/types';
 
 // Keys match the API, which serialises the enum's value (lowercase).
 const statusColors: Record<string, 'gray' | 'green' | 'red' | 'yellow' | 'blue'> = {
@@ -30,6 +31,43 @@ const statusOptions = [
   { value: 'failed', label: 'Failed' },
   { value: 'stalled', label: 'Stuck / stalled' },
 ];
+
+function inFlight(entry: DownloadQueueEntry): boolean {
+  return entry.status === 'downloading' || entry.status === 'decrypting';
+}
+
+function formatSeconds(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  return formatDuration(seconds);
+}
+
+/**
+ * Byte progress for an in-flight entry, a rough ETA, and how long it has been
+ * sitting at the same number.
+ *
+ * The ETA is a flat average of the rate so far and is labelled "~" because it
+ * will be wrong whenever the rate changes. The byte counter beside it is the
+ * signal that actually matters: it answers "is anything still happening?"
+ * without needing to be accurate about when it finishes.
+ */
+function formatProgress(entry: DownloadQueueEntry): string {
+  const done = entry.bytes_downloaded ?? 0;
+  const verb = entry.status === 'decrypting' ? 'decrypted' : 'downloaded';
+  // formatFileSize renders 0 as an empty string, which would leave a dangling
+  // verb on an entry that hasn't reported its first chunk yet.
+  const soFar = done > 0 ? formatFileSize(done) : '0 B';
+  const amount = entry.total_bytes
+    ? `${soFar} / ${formatFileSize(entry.total_bytes)}`
+    : soFar;
+
+  const eta = entry.eta_seconds != null ? ` · ~${formatSeconds(entry.eta_seconds)} left` : '';
+
+  // Below one poll interval, "idle 3s" is just noise on a healthy transfer.
+  const idle = entry.idle_seconds ?? 0;
+  const stuckFor = idle >= 30 ? ` · no change for ${formatSeconds(idle)}` : '';
+
+  return `${amount} ${verb}${eta}${stuckFor}`;
+}
 
 /**
  * Shows that the page is refreshing itself, so a queue that isn't moving reads
@@ -287,6 +325,11 @@ export function DownloadQueuePage() {
                     {entry.attempts > 1 && (
                       <span className="text-xs text-gray-500">
                         Attempt {entry.attempts}
+                      </span>
+                    )}
+                    {inFlight(entry) && (
+                      <span className="text-xs text-gray-500 tabular-nums">
+                        {formatProgress(entry)}
                       </span>
                     )}
                   </div>

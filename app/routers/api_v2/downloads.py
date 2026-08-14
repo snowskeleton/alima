@@ -14,6 +14,8 @@ from ...services.background_jobs import BackgroundJobService
 from ...services.book_download import (
     IN_FLIGHT_STATUSES,
     BookDownloadService,
+    entry_eta_seconds,
+    entry_idle_for,
     is_entry_stale,
 )
 
@@ -53,6 +55,15 @@ def _entry_to_dict(entry: DownloadQueue) -> dict:
         "download_type": entry.download_type.value,
         "status": entry.status.value,
         "stalled": is_entry_stale(entry),
+        "bytes_downloaded": entry.bytes_downloaded,
+        "total_bytes": entry.total_bytes,
+        "progress_at": entry.progress_at.isoformat() if entry.progress_at else None,
+        "idle_seconds": (
+            int(idle.total_seconds())
+            if entry.status in IN_FLIGHT_STATUSES and (idle := entry_idle_for(entry))
+            else None
+        ),
+        "eta_seconds": entry_eta_seconds(entry),
         "priority": entry.priority,
         "error_message": entry.error_message,
         "attempts": entry.attempts,
