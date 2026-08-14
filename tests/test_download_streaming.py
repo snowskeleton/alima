@@ -229,3 +229,77 @@ class TestDecryptProgress:
             snowcrypt.decrypt_aaxc
         ).parameters
         assert bd._SNOWCRYPT_REPORTS_PROGRESS is expected
+
+
+class TestTruncationDetection:
+    """
+    A body that ends early must fail the download, not write a short file and
+    let it reach the decrypter — where it surfaces as an opaque CBC padding
+    error instead of "the file is incomplete".
+    """
+
+    def test_short_body_raises(self, monkeypatch, tmp_path, service):
+        fake = _FakeStream([b"x" * 100], headers={"Content-Length": "1000"})
+        fake.num_bytes_downloaded = 100
+        _patch_stream(monkeypatch, fake)
+
+        with pytest.raises(IOError, match="Truncated download"):
+            service._download_file(
+                "https://cloudfront.net/book.aaxc", tmp_path / "book.aaxc"
+            )
+
+    def test_error_names_both_sizes(self, monkeypatch, tmp_path, service):
+        fake = _FakeStream([b"x" * 100], headers={"Content-Length": "1000"})
+        fake.num_bytes_downloaded = 100
+        _patch_stream(monkeypatch, fake)
+
+        with pytest.raises(IOError) as excinfo:
+            service._download_file(
+                "https://cloudfront.net/book.aaxc", tmp_path / "book.aaxc"
+            )
+
+        assert "100" in str(excinfo.value)
+        assert "1000" in str(excinfo.value)
+
+    def test_complete_body_passes(self, monkeypatch, tmp_path, service):
+        fake = _FakeStream([b"x" * 500, b"y" * 500], headers={"Content-Length": "1000"})
+        fake.num_bytes_downloaded = 1000
+        _patch_stream(monkeypatch, fake)
+
+        out = tmp_path / "book.aaxc"
+        service._download_file("https://cloudfront.net/book.aaxc", out)
+
+        assert out.stat().st_size == 1000
+
+    def test_no_content_length_is_not_treated_as_truncated(
+        self, monkeypatch, tmp_path, service
+    ):
+        """Nothing to compare against, so the check can't run."""
+        fake = _FakeStream([b"x" * 100])
+        fake.num_bytes_downloaded = 100
+        _patch_stream(monkeypatch, fake)
+
+        out = tmp_path / "book.aaxc"
+        service._download_file("https://cloudfront.net/book.aaxc", out)
+
+        assert out.stat().st_size == 100
+
+    def test_decoded_size_may_differ_from_content_length(
+        self, monkeypatch, tmp_path, service
+    ):
+        """
+        With a Content-Encoding, the header is the *encoded* length while
+        iter_bytes yields decoded bytes. Comparing written bytes would raise on
+        a perfectly good download, so the check uses the raw wire count.
+        """
+        fake = _FakeStream(
+            [b"x" * 5000],
+            headers={"Content-Length": "1000", "Content-Encoding": "gzip"},
+        )
+        fake.num_bytes_downloaded = 1000  # compressed bytes on the wire
+        _patch_stream(monkeypatch, fake)
+
+        out = tmp_path / "book.aaxc"
+        service._download_file("https://cloudfront.net/book.aaxc", out)
+
+        assert out.stat().st_size == 5000

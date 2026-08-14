@@ -1011,6 +1011,24 @@ class BookDownloadService:
                     if progress_callback:
                         progress_callback(written, total_bytes)
 
+            # A short body is not always an error to httpx — a connection that
+            # closes at a chunk boundary can end the iteration quietly. Left
+            # unchecked, the truncated .aaxc goes on to the decrypter, which
+            # fails deep inside a CBC block with a message about padding that
+            # says nothing about the real cause. Fail here, where it's obvious
+            # and the entry can simply be retried.
+            #
+            # Compare raw bytes off the wire, not what we wrote: with a
+            # Content-Encoding the header describes the encoded length while
+            # iter_bytes() yields decoded bytes, and the two legitimately
+            # differ.
+            received = getattr(response, "num_bytes_downloaded", written)
+            if total_bytes is not None and received != total_bytes:
+                raise IOError(
+                    f"Truncated download: got {received} of {total_bytes} bytes "
+                    f"({_describe_bytes(received)} of {_describe_bytes(total_bytes)})"
+                )
+
         logger.debug(f"Downloaded {written} bytes to {output_path}")
 
     def _path_reserved(self, output_path: Path, exclude_book_id: int) -> bool:
