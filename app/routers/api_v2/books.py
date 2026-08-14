@@ -267,13 +267,14 @@ async def reset_metadata(
 @router.post("/{book_id}/download")
 async def download_book(
     book_id: int,
+    force: bool = Query(False, description="Re-queue even if an entry is already in flight"),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
     """Queue a book for download."""
     download_service = BookDownloadService(db)
     try:
-        result = download_service.download_book_now(book_id)
+        result = download_service.download_book_now(book_id, force=force)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

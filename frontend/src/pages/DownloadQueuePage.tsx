@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useDownloads, useDownloadActions } from '../api/hooks/useDownloads';
 import { useJob } from '../api/hooks/useJobs';
 import { PageSpinner } from '../components/ui/Spinner';
@@ -10,13 +10,52 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { Alert } from '../components/ui/Alert';
 import { formatFileSize, formatDuration, timeAgo } from '../utils/format';
 
+// Keys match the API, which serialises the enum's value (lowercase).
 const statusColors: Record<string, 'gray' | 'green' | 'red' | 'yellow' | 'blue'> = {
-  PENDING: 'gray',
-  DOWNLOADING: 'blue',
-  DECRYPTING: 'blue',
-  COMPLETED: 'green',
-  FAILED: 'red',
+  pending: 'gray',
+  downloading: 'blue',
+  decrypting: 'blue',
+  completed: 'green',
+  failed: 'red',
 };
+
+// 'stalled' is a server-side pseudo-status: in flight, but nothing is working
+// on it any more. It has no enum member, only a per-entry flag.
+const statusOptions = [
+  { value: '', label: 'All statuses' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'downloading', label: 'Downloading' },
+  { value: 'decrypting', label: 'Decrypting' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'failed', label: 'Failed' },
+  { value: 'stalled', label: 'Stuck / stalled' },
+];
+
+/**
+ * Shows that the page is refreshing itself, so a queue that isn't moving reads
+ * as "nothing is happening" rather than "this page is stale again".
+ */
+function LiveIndicator({ isFetching, updatedAt }: { isFetching: boolean; updatedAt: number }) {
+  // Re-render on a timer so "updated 40s ago" keeps counting up between polls.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => tick((n) => n + 1), 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  const seconds = updatedAt ? Math.round((Date.now() - updatedAt) / 1000) : null;
+
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-gray-500" title="This page updates on its own">
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          isFetching ? 'bg-green-500 animate-pulse' : 'bg-green-500/50'
+        }`}
+      />
+      {isFetching ? 'Updating…' : seconds !== null && seconds < 10 ? 'Live' : `Updated ${seconds}s ago`}
+    </span>
+  );
+}
 
 export function DownloadQueuePage() {
   const [search, setSearch] = useState('');
@@ -30,11 +69,13 @@ export function DownloadQueuePage() {
   const [selected, setSelected] = useState<number[]>([]);
   const [processJobId, setProcessJobId] = useState<number>();
 
-  const { data, isLoading } = useDownloads({ search, status, read_status: readStatus, account, date_from: dateFrom, date_to: dateTo, sort, order });
-  const { retry, remove, patch, bulk, processQueue } = useDownloadActions();
+  const { data, isLoading, isFetching, dataUpdatedAt } = useDownloads({ search, status, read_status: readStatus, account, date_from: dateFrom, date_to: dateTo, sort, order });
+  const { retry, remove, patch, bulk, reapStale, processQueue } = useDownloadActions();
   const { data: job } = useJob(processJobId);
 
-  if (isLoading) return <PageSpinner />;
+  // Only block on the very first load. Re-rendering the spinner on later
+  // fetches would unmount the filter inputs and steal focus mid-typing.
+  if (isLoading && !data) return <PageSpinner />;
 
   const entries = data?.entries ?? [];
   const stats = data?.stats;
@@ -61,7 +102,10 @@ export function DownloadQueuePage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Download Queue</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-gray-900">Download Queue</h1>
+          <LiveIndicator isFetching={isFetching} updatedAt={dataUpdatedAt} />
+        </div>
         <div className="flex items-center gap-2">
           <Button onClick={handleProcess} disabled={processQueue.isPending}>
             {processQueue.isPending ? 'Starting...' : 'Process Queue'}
@@ -85,6 +129,26 @@ export function DownloadQueuePage() {
         </Alert>
       )}
 
+      {!!stats?.stalled && (
+        <Alert type="warning" className="mb-4">
+          <div className="flex items-center justify-between gap-3">
+            <span>
+              {stats.stalled} download{stats.stalled === 1 ? ' is' : 's are'} stuck with no
+              worker behind {stats.stalled === 1 ? 'it' : 'them'}. They are re-queued
+              automatically, or you can do it now.
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => reapStale.mutate()}
+              disabled={reapStale.isPending}
+            >
+              {reapStale.isPending ? 'Re-queuing…' : 'Re-queue stuck'}
+            </Button>
+          </div>
+        </Alert>
+      )}
+
       {stats && (
         <div className="grid grid-cols-5 gap-3 mb-6">
           <div className="bg-white p-3 rounded-lg border border-gray-200 text-center">
@@ -96,8 +160,8 @@ export function DownloadQueuePage() {
             <div className="text-xs text-gray-500">Pending</div>
           </div>
           <div className="bg-white p-3 rounded-lg border border-gray-200 text-center">
-            <div className="text-2xl font-bold text-blue-600">{stats.downloading}</div>
-            <div className="text-xs text-gray-500">Downloading</div>
+            <div className="text-2xl font-bold text-blue-600">{stats.in_flight}</div>
+            <div className="text-xs text-gray-500">In progress</div>
           </div>
           <div className="bg-white p-3 rounded-lg border border-gray-200 text-center">
             <div className="text-2xl font-bold text-green-600">{stats.completed}</div>
@@ -117,13 +181,7 @@ export function DownloadQueuePage() {
           <Select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            options={[
-              { value: '', label: 'All statuses' },
-              { value: 'PENDING', label: 'Pending' },
-              { value: 'DOWNLOADING', label: 'Downloading' },
-              { value: 'COMPLETED', label: 'Completed' },
-              { value: 'FAILED', label: 'Failed' },
-            ]}
+            options={statusOptions}
           />
           <Select
             value={readStatus}
@@ -171,6 +229,13 @@ export function DownloadQueuePage() {
             Mark Unread
           </Button>
           <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => bulk.mutate({ action: 'retry', entry_ids: selected }, { onSuccess: () => setSelected([]) })}
+          >
+            Re-queue
+          </Button>
+          <Button
             variant="danger"
             size="sm"
             onClick={() => {
@@ -216,8 +281,8 @@ export function DownloadQueuePage() {
                     <span className="font-medium text-gray-900 truncate">
                       {entry.book_title || entry.asin}
                     </span>
-                    <Badge color={statusColors[entry.status] || 'gray'}>
-                      {entry.status}
+                    <Badge color={entry.stalled ? 'yellow' : statusColors[entry.status] || 'gray'}>
+                      {entry.stalled ? `${entry.status} (stuck)` : entry.status}
                     </Badge>
                     {entry.attempts > 1 && (
                       <span className="text-xs text-gray-500">
@@ -241,7 +306,7 @@ export function DownloadQueuePage() {
                   )}
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  {entry.status === 'FAILED' && (
+                  {(entry.status === 'failed' || entry.stalled) && (
                     <Button
                       variant="secondary"
                       size="sm"

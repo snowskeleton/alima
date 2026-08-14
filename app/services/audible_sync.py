@@ -2,6 +2,7 @@
 
 import logging
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -22,6 +23,10 @@ from ..models import (
 from ..utils.html_text import html_to_text
 
 logger = logging.getLogger(__name__)
+
+# How recently a file in the audiobooks directory can have been written before
+# the integrity check will call it orphaned and move it to unassigned/.
+ORPHAN_GRACE_SECONDS = 600
 
 
 class AudibleSyncService:
@@ -606,6 +611,8 @@ class AudibleSyncService:
         Returns:
             Dictionary with verification statistics
         """
+        from .book_download import IN_FLIGHT_STATUSES
+
         stats = {
             "verified": 0,
             "missing": 0,
@@ -613,6 +620,17 @@ class AudibleSyncService:
             "orphaned_files": 0,
             "reconnected": 0,
             "moved_to_unassigned": 0,
+            "skipped_in_flight": 0,
+        }
+
+        # Books a download worker is actively writing. Their file may be
+        # mid-move between the temp directory and its reserved final path, so
+        # neither half of this check can draw conclusions about them yet.
+        in_flight_book_ids = {
+            row[0]
+            for row in self.db.query(DownloadQueue.book_id)
+            .filter(DownloadQueue.status.in_(IN_FLIGHT_STATUSES))
+            .all()
         }
 
         # PART 1: Check books that claim to have files
@@ -620,6 +638,10 @@ class AudibleSyncService:
         books_with_files = self.db.query(Book).filter(Book.file_path.isnot(None)).all()
 
         for book in books_with_files:
+            if book.id in in_flight_book_ids:
+                stats["skipped_in_flight"] += 1
+                continue
+
             stats["verified"] += 1
 
             # Build absolute path to file
@@ -670,6 +692,24 @@ class AudibleSyncService:
 
                 if existing_book:
                     # File is already properly associated
+                    continue
+
+                # A file that appeared moments ago is far more likely to be a
+                # download still settling than a genuine orphan. Relocating it
+                # to unassigned/ would break the download that just wrote it,
+                # so leave anything this recent for the next pass.
+                try:
+                    age_seconds = time.time() - file_path.stat().st_mtime
+                except OSError:
+                    # Vanished between listing and stat — nothing to judge.
+                    continue
+
+                if age_seconds < ORPHAN_GRACE_SECONDS:
+                    logger.debug(
+                        f"Skipping recently written file '{file_path.name}' "
+                        f"({int(age_seconds)}s old) — may still be in flight"
+                    )
+                    stats["skipped_in_flight"] += 1
                     continue
 
                 # This is an orphaned file - try to find its book

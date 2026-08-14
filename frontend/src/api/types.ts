@@ -62,6 +62,7 @@ export interface DownloadQueueEntry {
   asin: string;
   download_type: string;
   status: string;
+  stalled: boolean;
   priority: number;
   error_message: string | null;
   attempts: number;
@@ -81,8 +82,13 @@ export interface DownloadsResponse {
   stats: {
     total: number;
     unread: number;
+    /** downloading + decrypting */
+    in_flight: number;
+    /** in flight but no worker is behind them any more */
+    stalled: number;
     pending: number;
     downloading: number;
+    decrypting: number;
     failed: number;
     completed: number;
   };

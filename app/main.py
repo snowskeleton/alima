@@ -161,9 +161,18 @@ async def lifespan(app: FastAPI):
             settings.temp_path.mkdir(parents=True, exist_ok=True)
             print("✓ Data directories created")
 
-            # Start background scheduler (LEADER ONLY)
-            from .workers.scheduler import start_scheduler, stop_scheduler
+            # Reclaim downloads the previous process died holding, before the
+            # scheduler starts handing out work (LEADER ONLY)
+            from .workers.scheduler import (
+                recover_interrupted_downloads,
+                start_scheduler,
+                stop_scheduler,
+            )
 
+            recover_interrupted_downloads()
+            print("✓ Interrupted downloads recovered")
+
+            # Start background scheduler (LEADER ONLY)
             start_scheduler()
             print("✓ Background scheduler started")
 
@@ -291,11 +300,10 @@ async def root(db: Session = Depends(get_db)):
     return RedirectResponse(url="/library", status_code=303)
 
 
-# Include routers — functional endpoints only (files, RSS, SSE, external API)
-from .routers import api, ext_api, files, rss
+# Include routers — functional endpoints only (files, RSS, external API)
+from .routers import ext_api, files, rss
 from .routers.api_v2 import router as api_v2_router
 
-app.include_router(api.router)
 app.include_router(rss.router, prefix="/feed")
 app.include_router(rss.router, prefix="/feeds")
 app.include_router(files.router)

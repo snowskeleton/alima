@@ -101,6 +101,52 @@ def process_download_queue():
         db.close()
 
 
+def reap_stale_downloads():
+    """Periodic task to unstick downloads left in DOWNLOADING/DECRYPTING."""
+    from ..services.book_download import BookDownloadService
+
+    logger.debug("Starting scheduled stale download sweep")
+    db = SessionLocal()
+    try:
+        stats = BookDownloadService(db).reap_stale_entries()
+        if stats["requeued"] or stats["failed"]:
+            logger.info(
+                f"Stale download sweep: checked {stats['checked']}, "
+                f"re-queued {stats['requeued']}, failed {stats['failed']}"
+            )
+        else:
+            logger.debug(f"Stale download sweep: {stats['checked']} in flight, none stale")
+    except Exception as e:
+        logger.error(f"Error in stale download sweep: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+def recover_interrupted_downloads():
+    """
+    Reclaim every in-flight download at startup, regardless of age.
+
+    Download workers are threads in this process; none of them survive a
+    restart, so anything still marked DOWNLOADING or DECRYPTING when we come
+    up is abandoned by definition and would otherwise sit there forever.
+    """
+    from ..services.book_download import BookDownloadService
+
+    db = SessionLocal()
+    try:
+        stats = BookDownloadService(db).reap_stale_entries(ignore_age=True)
+        if stats["requeued"] or stats["failed"]:
+            logger.info(
+                f"Recovered {stats['requeued'] + stats['failed']} download(s) "
+                f"interrupted by restart (re-queued {stats['requeued']}, "
+                f"failed {stats['failed']})"
+            )
+    except Exception as e:
+        logger.error(f"Error recovering interrupted downloads: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
 def process_b2_uploads():
     """Periodic task to upload downloaded books to Backblaze B2."""
     from ..services.b2_upload import B2UploadService
@@ -191,6 +237,18 @@ def start_scheduler():
         replace_existing=True,
     )
     logger.debug("Scheduled download processing to run every 30 seconds")
+
+    # Sweep for downloads wedged in DOWNLOADING/DECRYPTING. process_queue()
+    # reaps too, but only when it runs — this covers the case where the queue
+    # is otherwise idle and nothing would trigger a reap.
+    scheduler.add_job(
+        reap_stale_downloads,
+        trigger=IntervalTrigger(minutes=5),
+        id="reap_stale_downloads",
+        name="Recover stuck downloads",
+        replace_existing=True,
+    )
+    logger.debug("Scheduled stale download sweep to run every 5 minutes")
 
     # Add B2 upload sweep (no-op unless B2 is configured). Runs less often than
     # the download queue since uploads are large and not latency-sensitive.

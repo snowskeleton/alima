@@ -21,6 +21,58 @@ from ..models import AudibleAccount, Book, DownloadQueue, DownloadStatus, Downlo
 
 logger = logging.getLogger(__name__)
 
+# Statuses that mean "a worker is supposed to be holding this entry right now".
+IN_FLIGHT_STATUSES = [
+    DownloadStatus.DOWNLOADING,
+    DownloadStatus.DECRYPTING,
+]
+
+# Statuses that block a book from being queued again.
+ACTIVE_STATUSES = [DownloadStatus.PENDING] + IN_FLIGHT_STATUSES
+
+# How long an entry may sit in DOWNLOADING/DECRYPTING before we assume the
+# worker that owned it is gone. Large books legitimately take a while, so this
+# is generous; the startup sweep catches the common case (process restart)
+# immediately regardless of age.
+DEFAULT_STALE_DOWNLOAD_MINUTES = 90
+
+
+def _stale_download_minutes() -> int:
+    from ..utils.settings_cache import get_cached_setting
+
+    return get_cached_setting(
+        "stale_download_minutes", DEFAULT_STALE_DOWNLOAD_MINUTES, int
+    )
+
+
+def _as_utc(value: Optional[datetime.datetime]) -> Optional[datetime.datetime]:
+    """Coerce a naive DB timestamp to UTC-aware so it can be compared."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=datetime.timezone.utc)
+    return value
+
+
+def is_entry_stale(entry: DownloadQueue, stale_minutes: Optional[int] = None) -> bool:
+    """
+    True if the entry claims to be in flight but nothing has touched it in a
+    long time — the worker died, the process restarted, or a decrypt hung.
+    """
+    if entry.status not in IN_FLIGHT_STATUSES:
+        return False
+
+    if stale_minutes is None:
+        stale_minutes = _stale_download_minutes()
+
+    # An in-flight entry with no started_at is inconsistent by definition.
+    started = _as_utc(entry.started_at)
+    if started is None:
+        return True
+
+    age = datetime.datetime.now(datetime.timezone.utc) - started
+    return age > datetime.timedelta(minutes=stale_minutes)
+
 
 class BookDownloadService:
     """Service for downloading and decrypting audiobooks."""
@@ -28,6 +80,76 @@ class BookDownloadService:
     def __init__(self, db: Session):
         """Initialize download service."""
         self.db = db
+
+    def reap_stale_entries(
+        self, stale_minutes: Optional[int] = None, ignore_age: bool = False
+    ) -> dict:
+        """
+        Recover downloads wedged in DOWNLOADING/DECRYPTING.
+
+        Nothing outside a live worker ever moves an entry out of those two
+        statuses, so an entry left in one is unrecoverable on its own: the
+        queue processor only picks up PENDING, and the "already queued" check
+        refuses to re-queue the book. This sweep is what unsticks them.
+
+        Args:
+            stale_minutes: Age threshold; defaults to the configured setting.
+            ignore_age: Reap every in-flight entry regardless of age. Used at
+                startup, where no worker can possibly still own one.
+
+        Returns:
+            Dictionary with reap statistics.
+        """
+        max_attempts = self._max_attempts()
+        entries = (
+            self.db.query(DownloadQueue)
+            .filter(DownloadQueue.status.in_(IN_FLIGHT_STATUSES))
+            .all()
+        )
+
+        stats = {"checked": len(entries), "requeued": 0, "failed": 0}
+
+        for entry in entries:
+            if not ignore_age and not is_entry_stale(entry, stale_minutes):
+                continue
+
+            started = _as_utc(entry.started_at)
+            stuck_for = (
+                datetime.datetime.now(datetime.timezone.utc) - started
+                if started
+                else None
+            )
+            stuck_desc = f"{int(stuck_for.total_seconds() // 60)}m" if stuck_for else "unknown duration"
+            was = entry.status.value
+
+            if entry.attempts < max_attempts:
+                entry.status = DownloadStatus.PENDING
+                entry.error_message = (
+                    f"Recovered: stuck in {was} for {stuck_desc}, re-queued automatically"
+                )
+                entry.started_at = None
+                stats["requeued"] += 1
+            else:
+                entry.status = DownloadStatus.FAILED
+                entry.error_message = (
+                    f"Stuck in {was} for {stuck_desc} after {entry.attempts} attempts"
+                )
+                stats["failed"] += 1
+
+            logger.warning(
+                f"Reaped stale download entry {entry.id} ({entry.asin}): "
+                f"{was} for {stuck_desc} -> {entry.status.value}"
+            )
+
+        if stats["requeued"] or stats["failed"]:
+            self.db.commit()
+
+        return stats
+
+    def _max_attempts(self) -> int:
+        from ..utils.settings_cache import get_cached_setting
+
+        return get_cached_setting("max_download_attempts", 3, int)
 
     def process_queue(self, max_downloads: int = None, max_concurrent: int = None) -> dict:
         """
@@ -44,6 +166,11 @@ class BookDownloadService:
         if max_concurrent is None:
             from ..utils.settings_cache import get_cached_setting
             max_concurrent = get_cached_setting("max_concurrent_downloads", 3, int)
+
+        # Unstick anything a dead worker left behind before looking for work,
+        # so a wedged entry rejoins this same batch instead of waiting for the
+        # next sweep.
+        self.reap_stale_entries()
 
         # Get pending downloads ordered by priority (higher first)
         query = (
@@ -324,27 +451,47 @@ class BookDownloadService:
             final_filename = f"{safe_title}.m4a"
             final_output_file = output_dir / final_filename
 
-            # Handle duplicate filenames in final location
+            # Handle duplicate filenames in the final location. A name is taken
+            # if a file is already there OR if another book has reserved it in
+            # the database but hasn't moved its file across yet.
             counter = 1
-            while final_output_file.exists():
+            while final_output_file.exists() or self._path_reserved(final_output_file, book.id):
                 final_filename = f"{safe_title}_{counter}.m4a"
                 final_output_file = output_dir / final_filename
                 counter += 1
 
-            # Atomically move completed file from temp to final location
-            # This prevents the integrity check from finding incomplete files
-            logger.debug(f"Moving decrypted file to final location: {final_output_file}")
-            shutil.move(str(temp_output_file), str(final_output_file))
+            decrypted_size = temp_output_file.stat().st_size
+            relative_path = str(final_output_file.relative_to(settings.audiobooks_path.parent))
 
-            # Update book record with final path
-            book.file_path = str(final_output_file.relative_to(settings.audiobooks_path.parent))
-            book.file_size = final_output_file.stat().st_size
+            # Reserve the path in the database BEFORE the file lands in the
+            # audiobooks directory.
+            #
+            # The sync's file-integrity check scans that directory every minute
+            # and treats any file it can't match to a book row as orphaned —
+            # moving it to unassigned/. If we moved first and committed after,
+            # a scan landing in that window would find a file no row claims,
+            # relocate it, and leave this book pointing at a path that no
+            # longer exists. Committing first means the scan always sees the
+            # claim, whichever order the two processes interleave in.
+            book.file_path = relative_path
+            book.file_size = decrypted_size
             book.file_format = "m4a"
             book.downloaded_at = datetime.datetime.now(datetime.timezone.utc)
-
-            # Commit immediately to prevent race condition with file integrity check
-            # The file is now in the audiobooks directory, so the database must be updated ASAP
             self.db.commit()
+
+            # Move completed file from temp to its reserved final location.
+            logger.debug(f"Moving decrypted file to final location: {final_output_file}")
+            try:
+                shutil.move(str(temp_output_file), str(final_output_file))
+            except Exception:
+                # Release the reservation so the book isn't left claiming a
+                # file that never arrived.
+                book.file_path = None
+                book.file_size = None
+                book.file_format = None
+                book.downloaded_at = None
+                self.db.commit()
+                raise
 
             # B2 upload is NOT done here on purpose — a multi-hundred-MB upload
             # would hold this download worker for its whole duration and stall
@@ -592,6 +739,16 @@ class BookDownloadService:
         with open(output_path, "wb") as f:
             f.write(response.content)
 
+    def _path_reserved(self, output_path: Path, exclude_book_id: int) -> bool:
+        """True if another book already claims this path in the database."""
+        relative_path = str(output_path.relative_to(settings.audiobooks_path.parent))
+        return (
+            self.db.query(Book)
+            .filter(Book.file_path == relative_path, Book.id != exclude_book_id)
+            .first()
+            is not None
+        )
+
     def _sanitize_filename(self, filename: str) -> str:
         """
         Sanitize filename for filesystem use.
@@ -614,12 +771,16 @@ class BookDownloadService:
 
         return filename.strip()
 
-    def download_book_now(self, book_id: int) -> dict:
+    def download_book_now(self, book_id: int, force: bool = False) -> dict:
         """
         Queue a book for immediate download (non-blocking).
 
         Args:
             book_id: ID of the book to download
+            force: Re-queue even if an entry is already in flight. Without it,
+                an entry that is genuinely stuck (its worker died mid-download
+                or mid-decrypt) is still re-queued automatically once it passes
+                the staleness threshold — force only skips the wait.
 
         Returns:
             Dictionary with queue status and entry ID
@@ -654,13 +815,39 @@ class BookDownloadService:
             self.db.query(DownloadQueue)
             .filter(
                 DownloadQueue.book_id == book_id,
-                DownloadQueue.status.in_([DownloadStatus.PENDING, DownloadStatus.DOWNLOADING, DownloadStatus.DECRYPTING])
+                DownloadQueue.status.in_(ACTIVE_STATUSES),
             )
+            .order_by(DownloadQueue.created_at.desc())
             .first()
         )
 
         if existing_queue:
-            # Already in queue
+            # An entry sitting in DOWNLOADING/DECRYPTING with no live worker
+            # behind it would otherwise block this book forever: the queue
+            # processor ignores it and this check refuses to add another.
+            # Reclaim it instead of reporting a download that isn't happening.
+            if force or is_entry_stale(existing_queue):
+                was = existing_queue.status.value
+                existing_queue.status = DownloadStatus.PENDING
+                existing_queue.error_message = None
+                existing_queue.attempts = 0
+                existing_queue.started_at = None
+                existing_queue.priority = max(existing_queue.priority, 999)
+                self.db.commit()
+
+                reason = "forced" if force else f"stuck in {was}"
+                logger.info(
+                    f"Re-queued book {book.asin} ({reason}, queue_id: {existing_queue.id})"
+                )
+                return {
+                    "success": True,
+                    "message": f"Book '{book.title}' was {reason} and has been re-queued",
+                    "queue_id": existing_queue.id,
+                    "status": DownloadStatus.PENDING.value,
+                    "requeued": True,
+                }
+
+            # Genuinely in flight or waiting its turn.
             logger.info(f"Book {book.asin} already in queue (queue_id: {existing_queue.id})")
             return {
                 "success": True,
