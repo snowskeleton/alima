@@ -17,7 +17,7 @@ itsdangerous==2.2.0
 
 # Audible
 audible==0.8.2
-snowcrypt==0.2.0.post1
+snowcrypt==0.2.1.post0
 
 # Metadata & Media
 mutagen==1.47.0
