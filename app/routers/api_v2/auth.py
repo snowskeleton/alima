@@ -17,7 +17,7 @@ from ...auth import (
     verify_magic_link,
 )
 from ...database import get_db
-from ...dependencies import get_current_user, get_optional_user
+from ...dependencies import get_current_user
 from ...models import User, UserRole
 from ...services.email_service import EmailService
 from ...services.settings_service import SettingsService

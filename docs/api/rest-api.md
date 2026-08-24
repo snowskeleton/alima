@@ -72,6 +72,7 @@ curl -X DELETE -H "Authorization: Bearer $KEY" https://your-alima-host/api/v2/fe
 | No credentials on `/api/**` | `401` with a JSON body |
 | Unknown or malformed bearer key | `401` (never falls back to a cookie) |
 | Valid credentials, insufficient role | `403` |
+| Bad key on a public endpoint | `401` — a wrong credential is never ignored |
 | No credentials on a browser page request | `303` redirect to `/auth/login` |
 
 The redirect only applies to HTML page requests. Anything under `/api/`, or any

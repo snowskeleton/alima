@@ -256,3 +256,98 @@ class TestKeyManagementIsSessionOnly:
         """A non-admin session is refused too - session auth is not a bypass."""
         response = authenticated_client.get("/api/v2/api-keys")
         assert response.status_code == 403
+
+
+class TestOptionalAuthEndpoints:
+    """Optional auth means "no credentials", not "wrong credentials"."""
+
+    def _public_feed_slug(self, db: Session, user: User) -> str:
+        from app.models import Feed
+
+        feed = Feed(
+            user_id=user.id,
+            name="Public Feed",
+            feed_type=FeedType.MANUAL,
+            slug="public-feed",
+            is_public=True,
+        )
+        db.add(feed)
+        db.commit()
+        return feed.slug
+
+    def test_anonymous_access_still_works(
+        self, client: TestClient, test_db: Session, test_user: User
+    ):
+        slug = self._public_feed_slug(test_db, test_user)
+        assert client.get(f"/api/v2/feeds/by-slug/{slug}").status_code == 200
+
+    def test_valid_key_is_accepted(
+        self, client: TestClient, test_db: Session, test_user: User, user_api_key: str
+    ):
+        slug = self._public_feed_slug(test_db, test_user)
+        response = client.get(
+            f"/api/v2/feeds/by-slug/{slug}", headers=bearer(user_api_key)
+        )
+        assert response.status_code == 200
+
+    def test_bad_key_does_not_silently_fall_back_to_a_session(
+        self, authenticated_client: TestClient, test_db: Session, test_user: User
+    ):
+        """A revoked key must not quietly act as whoever holds the cookie."""
+        slug = self._public_feed_slug(test_db, test_user)
+        response = authenticated_client.get(
+            f"/api/v2/feeds/by-slug/{slug}", headers=bearer("revoked")
+        )
+        assert response.status_code == 401
+
+    def test_expired_key_is_reported_as_expired(
+        self, client: TestClient, test_db: Session, test_user: User
+    ):
+        from tests.conftest import issue_api_key
+
+        slug = self._public_feed_slug(test_db, test_user)
+        key = issue_api_key(
+            test_db, test_user, "old", expires_at=datetime.utcnow() - timedelta(days=1)
+        )
+        response = client.get(f"/api/v2/feeds/by-slug/{slug}", headers=bearer(key))
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Expired API key"
+
+
+class TestUsageTrackingIsolation:
+    """Recording a key's use must not disturb the request's own session."""
+
+    def test_stamp_is_skipped_when_the_session_has_pending_work(
+        self, test_db: Session, test_admin: User
+    ):
+        """Bookkeeping never commits - or rolls back - unrelated pending changes."""
+        from app.dependencies import _record_key_use
+        from app.models import ApiKey
+        from tests.conftest import issue_api_key
+
+        issue_api_key(test_db, test_admin, "tracked")
+        record = test_db.query(ApiKey).filter(ApiKey.name == "tracked").one()
+
+        # Unrelated pending change on the same session.
+        test_admin.email = "pending@example.com"
+        assert test_db.dirty
+
+        _record_key_use(test_db, record)
+
+        # The edit is still pending: neither committed nor discarded.
+        assert test_db.dirty
+        assert record.last_used_at is None
+
+    def test_stamp_lands_on_a_clean_session(
+        self, test_db: Session, test_admin: User
+    ):
+        from app.dependencies import _record_key_use
+        from app.models import ApiKey
+        from tests.conftest import issue_api_key
+
+        issue_api_key(test_db, test_admin, "clean")
+        record = test_db.query(ApiKey).filter(ApiKey.name == "clean").one()
+
+        _record_key_use(test_db, record)
+
+        assert record.last_used_at is not None

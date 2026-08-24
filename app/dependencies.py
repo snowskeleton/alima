@@ -80,6 +80,13 @@ def _record_key_use(db: Session, api_key: ApiKey) -> None:
     """
     Stamp last_used_at, throttled so a busy key isn't written on every request.
 
+    Bookkeeping must never decide the fate of unrelated request state, so if the
+    session already has pending changes this skips the stamp rather than
+    committing someone else's work (or discarding it on rollback). In practice
+    the session is clean here - auth runs during dependency resolution, before
+    the endpoint has done anything - and a skipped stamp only costs a little
+    precision on a value that is throttled to the minute anyway.
+
     Never lets a bookkeeping failure break the request that triggered it.
     """
     now = datetime.utcnow()
@@ -87,6 +94,10 @@ def _record_key_use(db: Session, api_key: ApiKey) -> None:
         api_key.last_used_at is not None
         and (now - api_key.last_used_at).total_seconds() < LAST_USED_REFRESH_SECONDS
     ):
+        return
+
+    if db.new or db.deleted or db.dirty:
+        logger.debug("Request session has pending work; skipping API key use stamp")
         return
 
     try:
@@ -315,17 +326,28 @@ async def get_optional_user(
     pages that show different content for logged-in users but are still
     accessible to anonymous users.
 
+    "Optional" means the caller may present no credentials at all - not that a
+    credential they did present may be wrong. A bearer token that does not
+    resolve is rejected here exactly as it is in get_current_user, rather than
+    quietly falling back to whatever cookie the same request happens to carry.
+
     Args:
         session_token: JWT token from HTTP-only cookie
         credentials: Bearer credentials holding an API key
         db: Database session
 
     Returns:
-        User object if authenticated, None otherwise
+        User object if authenticated, None if no credentials were offered
+
+    Raises:
+        HTTPException: 401 if a bearer key was offered but is invalid or expired
     """
     api_user = _user_from_api_key(credentials, db)
     if api_user is not None:
         return api_user
+
+    if credentials is not None:
+        raise _api_key_rejection(credentials, db)
 
     if not session_token:
         return None
