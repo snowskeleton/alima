@@ -13,6 +13,7 @@ export function ApiKeyPage() {
   const { createKey, deleteKey } = useApiKeyActions();
   const [showCreate, setShowCreate] = useState(false);
   const [keyName, setKeyName] = useState('');
+  const [expiresInDays, setExpiresInDays] = useState('');
   const [newKey, setNewKey] = useState('');
 
   if (isLoading) return <PageSpinner />;
@@ -21,9 +22,14 @@ export function ApiKeyPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    const result = await createKey.mutateAsync(keyName);
+    const days = parseInt(expiresInDays, 10);
+    const result = await createKey.mutateAsync({
+      name: keyName,
+      expiresInDays: Number.isFinite(days) && days > 0 ? days : undefined,
+    });
     setNewKey(result.key);
     setKeyName('');
+    setExpiresInDays('');
     setShowCreate(false);
   };
 
@@ -67,8 +73,19 @@ export function ApiKeyPage() {
                 <div>
                   <span className="font-medium text-gray-900">{key.name}</span>
                   <span className="text-sm text-gray-500 ml-3 font-mono">{key.key_prefix}...</span>
+                  {key.is_expired && (
+                    <span className="ml-3 text-xs font-medium text-red-700 bg-red-100 rounded px-2 py-0.5">
+                      Expired
+                    </span>
+                  )}
                   <div className="text-xs text-gray-500 mt-1">
                     Created: {formatDateTime(key.created_at)}
+                    {' · '}
+                    Last used: {key.last_used_at ? formatDateTime(key.last_used_at) : 'Never'}
+                    {' · '}
+                    {key.expires_at
+                      ? `Expires: ${formatDateTime(key.expires_at)}`
+                      : 'Never expires'}
                   </div>
                 </div>
                 <Button
@@ -96,6 +113,14 @@ export function ApiKeyPage() {
             onChange={(e) => setKeyName(e.target.value)}
             placeholder="e.g. My Script"
             required
+          />
+          <Input
+            label="Expires in (days)"
+            type="number"
+            min="1"
+            value={expiresInDays}
+            onChange={(e) => setExpiresInDays(e.target.value)}
+            placeholder="Leave blank to never expire"
           />
           <Button type="submit" disabled={createKey.isPending}>
             {createKey.isPending ? 'Creating...' : 'Create Key'}

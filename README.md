@@ -162,6 +162,28 @@ alima2.0/
 └── README.md
 ```
 
+## API
+
+Alima exposes a self-describing HTTP API. Point any client at a running server:
+
+```bash
+curl -s http://localhost:8000/api            # discovery index
+curl -s http://localhost:8000/openapi.json   # full OpenAPI 3.1 schema
+```
+
+Interactive docs live at `/docs` (Swagger UI) and `/redoc`.
+
+Every authenticated endpoint accepts either an API key or the browser session
+cookie. Create a key under **Settings → API keys** (key management itself is
+session-only — a key cannot mint or revoke keys), then:
+
+```bash
+curl -H "Authorization: Bearer $ALIMA_API_KEY" http://localhost:8000/api/v2/books
+```
+
+Keys inherit the role of the user that created them. See
+[docs/api/rest-api.md](docs/api/rest-api.md) for details.
+
 ## Configuration
 
 Edit `.env` file to configure:

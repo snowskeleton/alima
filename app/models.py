@@ -417,8 +417,21 @@ class ApiKey(Base):
     key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
+    # NULL means the key has never authenticated a request. Keys that predate
+    # this column stay NULL rather than claiming a use that never happened.
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # NULL means the key never expires, which is how every key behaved before
+    # expiry existed - so existing keys keep working untouched.
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     # Relationships
     user: Mapped["User"] = relationship("User")
+
+    @property
+    def is_expired(self) -> bool:
+        """True when this key has an expiry that has already passed."""
+        return self.expires_at is not None and self.expires_at < datetime.utcnow()
 
 
 class ServerSettings(Base):

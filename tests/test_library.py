@@ -43,12 +43,11 @@ class TestBooksAccess:
 
     def test_list_requires_auth(self, client: TestClient, test_user):
         response = client.get("/api/v2/books", follow_redirects=False)
-        assert response.status_code == 303
-        assert "/auth/login" in response.headers["location"]
+        assert response.status_code == 401
 
     def test_detail_requires_auth(self, client: TestClient, test_user, test_book: Book):
         response = client.get(f"/api/v2/books/{test_book.id}", follow_redirects=False)
-        assert response.status_code == 303
+        assert response.status_code == 401
 
 
 @pytest.mark.integration

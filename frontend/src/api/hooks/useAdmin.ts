@@ -49,10 +49,17 @@ export function useApiKeyActions() {
   const qc = useQueryClient();
 
   const createKey = useMutation({
-    mutationFn: (name: string) =>
-      apiFetch<{ key: string; key_id: number; name: string; prefix: string }>(
+    // expiresInDays omitted means the key never expires
+    mutationFn: ({ name, expiresInDays }: { name: string; expiresInDays?: number }) =>
+      apiFetch<{ key: string; key_id: number; name: string; prefix: string; expires_at: string | null }>(
         '/api-keys',
-        { method: 'POST', body: JSON.stringify({ name }) },
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            name,
+            ...(expiresInDays ? { expires_in_days: expiresInDays } : {}),
+          }),
+        },
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['api-keys'] }),
   });

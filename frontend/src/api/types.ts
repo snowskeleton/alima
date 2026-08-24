@@ -160,4 +160,9 @@ export interface ApiKey {
   name: string;
   key_prefix: string;
   created_at: string;
+  /** null when the key has never authenticated a request */
+  last_used_at: string | null;
+  /** null when the key never expires */
+  expires_at: string | null;
+  is_expired: boolean;
 }

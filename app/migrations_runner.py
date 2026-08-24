@@ -984,6 +984,76 @@ def run_migration_019_add_download_progress(db: Session, engine) -> None:
         raise
 
 
+def run_migration_020_add_api_key_usage_and_expiry(db: Session, engine) -> None:
+    """Add last_used_at and expires_at columns to api_keys.
+
+    Both are nullable and existing rows are left NULL on purpose: NULL last_used_at
+    means "never seen used" rather than a fabricated timestamp, and NULL expires_at
+    means "never expires", which is how every pre-existing key already behaved.
+    """
+    migration_name = "020_add_api_key_usage_and_expiry"
+
+    is_postgres = "postgresql" in str(engine.url)
+
+    # The api_keys table itself may not exist yet on a fresh database that
+    # created its schema from the models - nothing to alter in that case.
+    if is_postgres:
+        result = db.execute(text("""
+            SELECT table_name FROM information_schema.tables
+            WHERE table_name='api_keys'
+        """))
+    else:
+        result = db.execute(text("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='api_keys'
+        """))
+    if result.fetchone() is None:
+        logger.debug("Table api_keys does not exist yet, skipping %s", migration_name)
+        return
+
+    if is_postgres:
+        result = db.execute(text("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name='api_keys' AND column_name IN ('last_used_at', 'expires_at')
+        """))
+        existing = {row[0] for row in result.fetchall()}
+    else:
+        result = db.execute(text("PRAGMA table_info(api_keys)"))
+        columns = {col[1] for col in result.fetchall()}
+        existing = columns & {"last_used_at", "expires_at"}
+
+    missing = {"last_used_at", "expires_at"} - existing
+
+    if not missing:
+        logger.debug("API key usage columns already exist, ensuring migration is marked as applied")
+        if not has_migration_been_applied(db, migration_name):
+            mark_migration_applied(db, migration_name)
+        return
+
+    if has_migration_been_applied(db, migration_name):
+        logger.warning(f"Migration {migration_name} was marked as applied but columns don't exist - re-running")
+        db.execute(text("DELETE FROM schema_migrations WHERE migration_name = :name"), {"name": migration_name})
+        db.commit()
+
+    logger.debug(f"Running migration: {migration_name}")
+
+    try:
+        # Added one at a time so a half-applied table (one column present) still
+        # gets the other rather than failing on a duplicate.
+        for column in ("last_used_at", "expires_at"):
+            if column in missing:
+                db.execute(text(f"ALTER TABLE api_keys ADD COLUMN {column} TIMESTAMP NULL"))
+
+        db.commit()
+        mark_migration_applied(db, migration_name)
+        logger.info(f"Migration {migration_name} completed successfully!")
+
+    except Exception as e:
+        logger.error(f"Migration {migration_name} failed: {e}", exc_info=True)
+        db.rollback()
+        raise
+
+
 def run_all_pending_migrations(db: Session) -> None:
     """Run all pending migrations in order."""
     from .database import engine
@@ -1007,6 +1077,7 @@ def run_all_pending_migrations(db: Session) -> None:
         run_migration_017_add_b2_keys,
         run_migration_018_strip_html_descriptions,
         run_migration_019_add_download_progress,
+        run_migration_020_add_api_key_usage_and_expiry,
     ]
 
     for migration_func in migrations:

@@ -210,12 +210,58 @@ async def lifespan(app: FastAPI):
     print("Shutting down...")
 
 
+API_DESCRIPTION = """\
+Audible Library Manager - download and manage audiobooks with RSS feeds.
+
+## Authentication
+
+Every authenticated endpoint accepts **either** of:
+
+* `Authorization: Bearer <api-key>` - programmatic access. Create a key in the
+  web UI under Settings -> API keys; the full key is shown only once, at
+  creation. Key management endpoints accept browser sessions only, so a key
+  can never mint or revoke keys.
+* `session_token` cookie - the JWT issued to browsers after a magic-link login.
+
+API keys inherit the role of the user that owns them, so admin-only endpoints
+require a key belonging to an admin.
+
+Unauthenticated requests to `/api/**` (or any request sending `Authorization`
+or `Accept: application/json`) get `401` with a JSON body; browser page requests
+are redirected to the login page instead.
+
+## Machine-readable schema
+
+* `GET /openapi.json` - the full OpenAPI 3.1 document for this server
+* `GET /docs` - Swagger UI
+* `GET /redoc` - ReDoc
+
+## API surface
+
+* `/api/v2/**` - the primary API, used by the web frontend and available to
+  API-key clients.
+* `/api/v1/**` - a small legacy external API; API-key only.
+"""
+
+OPENAPI_TAGS = [
+    {"name": "Health", "description": "Liveness and build information."},
+    {"name": "Root", "description": "Entry points and static resources."},
+    {"name": "API", "description": "Legacy /api/v1 external API (API key only)."},
+    {"name": "API v2", "description": "Primary /api/v2 API: books, feeds, downloads, jobs, users, settings."},
+    {"name": "SPA", "description": "Catch-all serving the React single-page app."},
+]
+
 # Create FastAPI application
 app = FastAPI(
     title=settings.app_name,
-    description="Audible Library Manager - Download and manage audiobooks with RSS feeds",
+    description=API_DESCRIPTION,
+    summary="Audiobook library management API",
     version="2.0.0",
     lifespan=lifespan,
+    openapi_tags=OPENAPI_TAGS,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
 )
 
 # Add rate limiter to app state
@@ -279,6 +325,41 @@ async def robots():
     from pathlib import Path
     robots_path = Path("app/static/robots.txt")
     return robots_path.read_text()
+
+
+@app.get("/api", tags=["Root"])
+async def api_index(request: Request):
+    """
+    API discovery index.
+
+    Small, unauthenticated entry point so a client (or another tool) can find
+    the schema and learn how to authenticate without scraping the UI.
+    """
+    base = str(request.base_url).rstrip("/")
+    return JSONResponse(
+        content={
+            "name": settings.app_name,
+            "version": "2.0.0",
+            "openapi": f"{base}/openapi.json",
+            "docs": {"swagger": f"{base}/docs", "redoc": f"{base}/redoc"},
+            "versions": {
+                "v2": f"{base}/api/v2",
+                "v1": f"{base}/api/v1",
+            },
+            "authentication": {
+                "scheme": "bearer",
+                "header": "Authorization: Bearer <api-key>",
+                "create_key": (
+                    "Web UI only: Settings -> API keys. Key management requires "
+                    "a logged-in browser session and cannot be done with a key."
+                ),
+                "note": (
+                    "API keys carry the role of the user that created them. "
+                    "Browser sessions may instead use the session_token cookie."
+                ),
+            },
+        }
+    )
 
 
 @app.get("/", tags=["Root"])

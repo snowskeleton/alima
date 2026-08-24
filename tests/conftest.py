@@ -156,3 +156,41 @@ def admin_client(client: TestClient, test_admin: User):
     )
     client.cookies.set("session_token", token)
     return client
+
+
+def issue_api_key(
+    db: Session,
+    user: User,
+    name: str = "test key",
+    expires_at=None,
+) -> str:
+    """Mint an API key for a user and return the raw key (only time it exists)."""
+    import hashlib
+    import secrets
+
+    from app.models import ApiKey
+
+    raw_key = secrets.token_urlsafe(32)
+    db.add(
+        ApiKey(
+            user_id=user.id,
+            name=name,
+            key_prefix=raw_key[:8],
+            key_hash=hashlib.sha256(raw_key.encode()).hexdigest(),
+            expires_at=expires_at,
+        )
+    )
+    db.commit()
+    return raw_key
+
+
+@pytest.fixture
+def user_api_key(test_db: Session, test_user: User) -> str:
+    """Raw API key belonging to the regular test user."""
+    return issue_api_key(test_db, test_user, "user key")
+
+
+@pytest.fixture
+def admin_api_key(test_db: Session, test_admin: User) -> str:
+    """Raw API key belonging to the admin test user."""
+    return issue_api_key(test_db, test_admin, "admin key")

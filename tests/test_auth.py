@@ -260,11 +260,10 @@ class TestAuthAPI:
         assert "Max-Age=0" in set_cookie
 
     def test_profile_requires_auth(self, client, test_user):
-        """Unauthenticated profile access is bounced to the login page."""
+        """Unauthenticated profile access is rejected."""
         response = client.get("/api/v2/auth/profile", follow_redirects=False)
 
-        assert response.status_code == 303
-        assert "/auth/login" in response.headers["location"]
+        assert response.status_code == 401
 
     def test_profile_returns_current_user(self, authenticated_client, test_user):
         """The profile route describes the signed-in user."""

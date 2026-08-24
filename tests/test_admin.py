@@ -22,10 +22,9 @@ class TestUserAdminAccess:
         assert response.status_code == 403
 
     def test_list_users_requires_a_session(self, client: TestClient, test_user: User):
-        """Anonymous callers are bounced to login rather than shown the list."""
+        """Anonymous callers get a 401 rather than the list."""
         response = client.get("/api/v2/users", follow_redirects=False)
-        assert response.status_code == 303
-        assert "/auth/login" in response.headers["location"]
+        assert response.status_code == 401
 
 
 @pytest.mark.integration

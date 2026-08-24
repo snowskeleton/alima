@@ -74,6 +74,7 @@ nav:
     - User Management: user-guide/users.md
     - Server Settings: user-guide/server-settings.md
   - API Reference:
+    - REST API: api/rest-api.md
     - Models: api/models.md
     - Services: api/services.md
     - Routers: api/routers.md

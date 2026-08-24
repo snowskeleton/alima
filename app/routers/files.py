@@ -20,8 +20,10 @@ router = APIRouter(prefix="/files", tags=["Files"])
 
 # HEAD as well as GET: podcast players HEAD the enclosure to check size and type
 # before downloading, and FastAPI's .get() registers GET only — a HEAD was 405ing,
-# which players report as the episode being unavailable.
-@router.api_route("/audiobooks/{book_id}.{ext}", methods=["GET", "HEAD"])
+# which players report as the episode being unavailable. The HEAD route is kept
+# out of the schema so the two don't collide on one operationId.
+@router.get("/audiobooks/{book_id}.{ext}")
+@router.head("/audiobooks/{book_id}.{ext}", include_in_schema=False)
 async def serve_audiobook(
     book_id: int,
     ext: str,
@@ -119,7 +121,8 @@ async def serve_audiobook(
     )
 
 
-@router.api_route("/covers/{filepath:path}", methods=["GET", "HEAD"])
+@router.get("/covers/{filepath:path}")
+@router.head("/covers/{filepath:path}", include_in_schema=False)
 async def serve_cover(filepath: str):
     """
     Serve cover image.
