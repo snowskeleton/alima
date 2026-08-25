@@ -11,6 +11,7 @@ from ...config import settings
 from ...database import get_db
 from ...dependencies import require_admin
 from ...models import Book, User
+from ...schemas import DatabaseId
 from ...services.background_jobs import BackgroundJobService
 from ...services.book_import import BookImportService
 from ...services.metadata import MetadataService
@@ -79,7 +80,7 @@ async def upload_book(
 
 @router.put("/{book_id}/metadata")
 async def update_import_metadata(
-    book_id: int,
+    book_id: DatabaseId,
     body: dict,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),

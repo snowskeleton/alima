@@ -3,13 +3,14 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session, contains_eager
 
 from ...database import get_db
 from ...dependencies import require_admin
 from ...models import AudibleAccount, Book, DownloadQueue, DownloadStatus, User
+from ...schemas import DatabaseId
 from ...services.background_jobs import BackgroundJobService
 from ...services.book_download import (
     IN_FLIGHT_STATUSES,
@@ -185,12 +186,26 @@ async def list_downloads(
             | (DownloadQueue.error_message.ilike(search_term))
         )
 
+    # strptime raises ValueError on anything that isn't YYYY-MM-DD, which reached
+    # the client as a 500. These are user-supplied query parameters, so a bad
+    # value is a 422.
+    def _parse_date(value: str, param: str) -> datetime:
+        try:
+            return datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid {param} {value!r}. Expected format YYYY-MM-DD.",
+            )
+
     if date_from:
-        from_date = datetime.strptime(date_from, "%Y-%m-%d")
-        query = query.filter(DownloadQueue.created_at >= from_date)
+        query = query.filter(
+            DownloadQueue.created_at >= _parse_date(date_from, "date_from")
+        )
     if date_to:
-        to_date = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
-        query = query.filter(DownloadQueue.created_at < to_date)
+        query = query.filter(
+            DownloadQueue.created_at < _parse_date(date_to, "date_to") + timedelta(days=1)
+        )
 
     sort_column = getattr(DownloadQueue, sort, DownloadQueue.created_at)
     if order == "desc":
@@ -211,7 +226,7 @@ async def list_downloads(
 
 @router.post("/{queue_id}/retry")
 async def retry_download(
-    queue_id: int,
+    queue_id: DatabaseId,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -241,7 +256,7 @@ async def reap_stale(
 
 @router.delete("/{queue_id}")
 async def remove_download(
-    queue_id: int,
+    queue_id: DatabaseId,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -256,7 +271,7 @@ async def remove_download(
 
 @router.patch("/{queue_id}")
 async def patch_download(
-    queue_id: int,
+    queue_id: DatabaseId,
     body: dict,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),

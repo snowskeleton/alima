@@ -12,6 +12,7 @@ from ...config import settings
 from ...database import get_db
 from ...dependencies import require_admin
 from ...models import AudibleAccount, Book, DownloadQueue, DownloadStatus, DownloadType, User
+from ...schemas import DatabaseId
 from ...services.background_jobs import BackgroundJobService
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
@@ -64,10 +65,19 @@ async def add_account(
     content = await auth_file.read()
     try:
         auth_data = json_mod.loads(content)
+        # json.loads happily returns a bare int, str, or list for input like
+        # "1", none of which have .get() — that was a 500 on a malformed upload.
+        if not isinstance(auth_data, dict):
+            raise HTTPException(
+                status_code=400, detail="Auth file must contain a JSON object"
+            )
         activation_bytes = auth_data.get("activation_bytes")
         if not activation_bytes:
             raise HTTPException(status_code=400, detail="Auth file missing activation_bytes")
-    except json_mod.JSONDecodeError:
+    except (json_mod.JSONDecodeError, UnicodeDecodeError):
+        # UnicodeDecodeError as well as JSONDecodeError: json.loads decodes the
+        # raw upload bytes as UTF-8 first, so a binary file raises before it ever
+        # reaches the JSON parser.
         raise HTTPException(status_code=400, detail="Invalid JSON auth file")
 
     settings.audible_auth_path.mkdir(parents=True, exist_ok=True)
@@ -92,7 +102,7 @@ async def add_account(
 
 @router.patch("/{account_id}")
 async def patch_account(
-    account_id: int,
+    account_id: DatabaseId,
     body: dict,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -121,7 +131,7 @@ async def patch_account(
 
 @router.delete("/{account_id}")
 async def delete_account(
-    account_id: int,
+    account_id: DatabaseId,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -137,7 +147,7 @@ async def delete_account(
 
 @router.post("/{account_id}/sync")
 async def sync_account(
-    account_id: int,
+    account_id: DatabaseId,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -163,7 +173,7 @@ async def sync_account(
 
 @router.post("/{account_id}/queue-all")
 async def queue_all_books(
-    account_id: int,
+    account_id: DatabaseId,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):

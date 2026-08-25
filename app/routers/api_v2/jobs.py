@@ -10,13 +10,14 @@ from sse_starlette.sse import EventSourceResponse
 from ...database import get_db
 from ...dependencies import get_current_active_user
 from ...models import BackgroundJob, JobStatus, User
+from ...schemas import DatabaseId
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
 
 @router.get("/{job_id}")
 async def get_job(
-    job_id: int,
+    job_id: DatabaseId,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
@@ -79,7 +80,7 @@ async def _job_progress_generator(job_id: int, db: Session):
 
 @router.get("/{job_id}/stream")
 async def stream_job_progress(
-    job_id: int,
+    job_id: DatabaseId,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):

@@ -8,6 +8,7 @@ from ...auth import create_magic_link, create_user
 from ...database import get_db
 from ...dependencies import require_admin
 from ...models import Feed, FeedType, User, UserRole
+from ...schemas import DatabaseId
 from ...services.email_service import EmailService
 from ...services.settings_service import SettingsService
 from ...utils.tokens import generate_invite_token
@@ -24,6 +25,24 @@ def _user_to_dict(user: User) -> dict:
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "last_login": user.last_login.isoformat() if user.last_login else None,
     }
+
+
+def _parse_role(value: object) -> UserRole:
+    """Coerce a client-supplied role, answering 422 rather than 500 on garbage.
+
+    UserRole() raises ValueError for an unknown value, and both the create and
+    patch handlers took the role straight from the request body.
+    """
+    try:
+        return UserRole(value)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid role {value!r}. "
+                f"Expected one of: {', '.join(r.value for r in UserRole)}"
+            ),
+        )
 
 
 class CreateUserRequest(BaseModel):
@@ -65,7 +84,7 @@ async def create_user_endpoint(
     if existing:
         raise HTTPException(status_code=400, detail=f"User '{body.email}' already exists")
 
-    user = create_user(db, body.email, role=body.role)
+    user = create_user(db, body.email, role=_parse_role(body.role).value)
 
     default_feed = Feed(
         user_id=user.id,
@@ -100,7 +119,7 @@ async def create_user_endpoint(
 
 @router.patch("/{user_id}")
 async def patch_user(
-    user_id: int,
+    user_id: DatabaseId,
     body: dict,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -113,7 +132,7 @@ async def patch_user(
     if "role" in body:
         if user.id == current_user.id:
             raise HTTPException(status_code=400, detail="Cannot change your own role")
-        user.role = UserRole(body["role"])
+        user.role = _parse_role(body["role"])
 
     if "receive_notifications" in body:
         if user.role != UserRole.ADMIN:
@@ -126,7 +145,7 @@ async def patch_user(
 
 @router.delete("/{user_id}")
 async def delete_user(
-    user_id: int,
+    user_id: DatabaseId,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -144,7 +163,7 @@ async def delete_user(
 
 @router.post("/{user_id}/send-login-link")
 async def send_login_link(
-    user_id: int,
+    user_id: DatabaseId,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):

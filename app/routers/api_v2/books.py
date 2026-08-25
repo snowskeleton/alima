@@ -13,6 +13,7 @@ from ...config import settings
 from ...database import get_db
 from ...dependencies import get_current_active_user, require_admin
 from ...models import Book, DownloadQueue, DownloadStatus, DownloadType, User
+from ...schemas import DatabaseId
 from ...services.book_download import BookDownloadService
 
 router = APIRouter(prefix="/books", tags=["Books"])
@@ -192,7 +193,7 @@ async def bulk_action(
 
 @router.get("/{book_id}")
 async def get_book(
-    book_id: int,
+    book_id: DatabaseId,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
@@ -225,7 +226,7 @@ async def get_book(
 
 @router.put("/{book_id}/metadata")
 async def update_metadata(
-    book_id: int,
+    book_id: DatabaseId,
     body: dict,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -249,7 +250,7 @@ async def update_metadata(
 
 @router.delete("/{book_id}/metadata")
 async def reset_metadata(
-    book_id: int,
+    book_id: DatabaseId,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -266,7 +267,7 @@ async def reset_metadata(
 
 @router.post("/{book_id}/download")
 async def download_book(
-    book_id: int,
+    book_id: DatabaseId,
     force: bool = Query(False, description="Re-queue even if an entry is already in flight"),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -282,7 +283,7 @@ async def download_book(
 
 @router.post("/{book_id}/unmatch")
 async def unmatch_book(
-    book_id: int,
+    book_id: DatabaseId,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
@@ -321,7 +322,7 @@ async def unmatch_book(
 
 @router.delete("/{book_id}/file")
 async def delete_file(
-    book_id: int,
+    book_id: DatabaseId,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
@@ -351,7 +352,7 @@ async def delete_file(
 
 @router.delete("/{book_id}")
 async def delete_book(
-    book_id: int,
+    book_id: DatabaseId,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -387,7 +388,7 @@ async def delete_book(
 
 @router.patch("/{book_id}")
 async def patch_book(
-    book_id: int,
+    book_id: DatabaseId,
     body: dict,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
