@@ -106,6 +106,41 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class RejectNullBytesMiddleware(BaseHTTPMiddleware):
+    """Reject requests whose path or query string contains a NUL byte.
+
+    PostgreSQL cannot store NUL inside a text value, and psycopg2 refuses to
+    send one at all:
+
+        ValueError: A string literal cannot contain NUL (0x00) characters.
+
+    That is raised while building the query, so any user-supplied string that
+    reaches the database takes down the request with a 500. SQLite accepts NUL
+    without complaint, which is why this only ever failed in production.
+
+    Handled here rather than per-endpoint on purpose: every string parameter on
+    every route is a candidate, including ones not written yet, so validating at
+    the edge is the only version of this fix that stays fixed. A NUL byte in a
+    URL is never legitimate, so it is a flat 400.
+    """
+
+    async def dispatch(self, request, call_next):
+        # query_params, not scope["query_string"]: the raw scope value is still
+        # percent-encoded, so a NUL arrives as the literal text "%00" and a byte
+        # comparison against it never matches. Starlette decodes query_params
+        # and scope["path"], which is what actually reaches the handlers.
+        has_null = "\x00" in request.scope.get("path", "") or any(
+            "\x00" in key or "\x00" in value
+            for key, value in request.query_params.multi_items()
+        )
+        if has_null:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"detail": "Request contains a NUL byte"},
+            )
+        return await call_next(request)
+
+
 class NoIndexMiddleware(BaseHTTPMiddleware):
     """
     Middleware to add X-Robots-Tag header to all responses.
@@ -285,6 +320,9 @@ app.add_middleware(HTTPSRedirectMiddleware)
 
 # Add X-Robots-Tag header to prevent search engine indexing
 app.add_middleware(NoIndexMiddleware)
+
+# Reject NUL bytes before anything can pass them to the database
+app.add_middleware(RejectNullBytesMiddleware)
 
 # Trust proxy headers (for HTTPS behind reverse proxy)
 app.add_middleware(

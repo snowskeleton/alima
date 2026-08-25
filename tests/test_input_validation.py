@@ -155,6 +155,53 @@ class TestDateParameters:
         assert response.status_code == 200
 
 
+class TestNullBytes:
+    """A NUL byte anywhere in the URL is refused before it reaches the database.
+
+    PostgreSQL cannot store NUL in a text value and psycopg2 refuses to send one
+    while building the query, so any user-supplied string carrying one was a 500.
+    SQLite accepts NUL silently, so this only ever failed against the production
+    dialect -- the PostgreSQL CI job caught it.
+
+    Rejected centrally in middleware rather than per-endpoint, because every
+    string parameter on every route is a candidate, including routes not written
+    yet. These cases therefore cover the guard, not any one endpoint.
+    """
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/v2/auth/magic-link?token=abc%00def",  # the case the fuzzer hit
+            "/api/v2/auth/status?x=%00",
+            "/api/v2/auth/status?a%00b=1",  # NUL in the parameter *name*
+            "/api/v2/books?search=%00",
+            "/api/v2/feeds/by-slug/%00",
+        ],
+    )
+    def test_null_bytes_are_refused(self, client: TestClient, path: str):
+        response = client.get(path, follow_redirects=False)
+        assert response.status_code == 400, (
+            f"{path} returned {response.status_code}; a NUL byte must be "
+            "rejected before it can reach the database"
+        )
+        assert "NUL" in response.json()["detail"]
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/health",
+            "/api/v2/auth/status",
+            "/api/v2/books?search=the%20hobbit",
+            "/api/v2/books?search=caf%C3%A9",  # non-ASCII must still pass
+            "/library",
+        ],
+    )
+    def test_ordinary_requests_are_untouched(self, client: TestClient, path: str):
+        """The guard must not reject anything legitimate."""
+        response = client.get(path, follow_redirects=False)
+        assert response.status_code != 400 or "NUL" not in response.text
+
+
 class TestOversizedIdentifiers:
     """Path ids wider than a 64-bit integer overflowed the database driver.
 
