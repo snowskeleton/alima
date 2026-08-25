@@ -120,21 +120,36 @@ class TestOversizedIdentifiers:
 
     HUGE = 2**63  # one past the top of a signed 64-bit integer
 
+    # Method matters: users, downloads and accounts have no GET route, so a GET
+    # never reached them at all -- it fell through to the SPA catch-all, and the
+    # assertion passed against that instead of against the endpoint.
     @pytest.mark.parametrize(
-        "path",
+        "method,path",
         [
-            "/api/v2/books/{id}",
-            "/api/v2/feeds/{id}",
-            "/api/v2/users/{id}",
-            "/api/v2/downloads/{id}",
-            "/api/v2/accounts/{id}",
-            "/files/audiobooks/{id}.m4b",
+            ("GET", "/api/v2/books/{id}"),
+            ("GET", "/api/v2/feeds/{id}"),
+            ("GET", "/files/audiobooks/{id}.m4b"),
+            ("DELETE", "/api/v2/users/{id}"),
+            ("DELETE", "/api/v2/downloads/{id}"),
+            ("DELETE", "/api/v2/accounts/{id}"),
+            ("PATCH", "/api/v2/books/{id}"),
         ],
     )
-    def test_oversized_id_is_rejected(self, admin_json_client: TestClient, path: str):
-        response = admin_json_client.get(path.format(id=self.HUGE))
+    def test_oversized_id_is_rejected(
+        self, admin_json_client: TestClient, method: str, path: str
+    ):
+        response = admin_json_client.request(
+            method, path.format(id=self.HUGE), json={} if method == "PATCH" else None
+        )
         assert response.status_code < 500, (
-            f"{path} returned {response.status_code} for an id wider than 64 bits"
+            f"{method} {path} returned {response.status_code} for an id wider "
+            "than 64 bits"
+        )
+        # Specifically a validation rejection, not an incidental 404/405 that
+        # would let a genuine overflow slip back in unnoticed.
+        assert response.status_code == 422, (
+            f"{method} {path} returned {response.status_code}; the declared "
+            "bound on DatabaseId should make this a 422"
         )
 
     def test_zero_and_negative_ids_are_rejected(self, admin_json_client: TestClient):

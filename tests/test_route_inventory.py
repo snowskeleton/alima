@@ -230,7 +230,77 @@ def test_credential_ignoring_route_survives_a_bogus_header(
         follow_redirects=False,
         headers={"Authorization": "Bearer not-a-real-api-key"},
     )
+
+    # The SPA catch-all answers 503 when app/static/spa/index.html has not been
+    # built. That is a build-state condition, not behaviour under test, and the
+    # backend suite deliberately does not depend on the frontend being built.
+    if route.path == "/{full_path:path}" and response.status_code == 503:
+        pytest.skip("SPA not built; nothing to assert about the catch-all")
+
     assert response.status_code < 500, (
         f"{route} returned {response.status_code} when sent a junk "
         "Authorization header."
     )
+
+
+# ---------------------------------------------------------------------------
+# The SPA catch-all must not answer for the API
+# ---------------------------------------------------------------------------
+
+
+class TestCatchAllDoesNotSwallowTheApi:
+    """The catch-all matches any unmatched GET, including /api/** paths.
+
+    Before this was fixed, a GET to a POST-only endpoint returned 200 and an
+    HTML page: the catch-all matched the path and served index.html. An API
+    client had no way to distinguish that from success. It only became visible
+    in CI, where the SPA is not built and the same requests returned 503.
+    """
+
+    def test_wrong_method_on_a_real_endpoint_is_405(self, client: TestClient):
+        response = client.get("/api/v2/auth/register")  # register is POST-only
+        assert response.status_code == 405
+        assert "POST" in response.headers.get("allow", "")
+        assert response.headers["content-type"].startswith("application/json")
+
+    def test_unknown_api_path_is_404_json(self, client: TestClient):
+        response = client.get("/api/v2/no-such-endpoint")
+        assert response.status_code == 404
+        assert response.headers["content-type"].startswith("application/json")
+
+    @pytest.mark.parametrize(
+        "path", ["/api/v2/books", "/files/covers/x.jpg", "/feed/x.xml"]
+    )
+    def test_api_prefixes_never_return_html(self, client: TestClient, path: str):
+        response = client.get(path, follow_redirects=False)
+        assert "text/html" not in response.headers.get("content-type", ""), (
+            f"{path} was answered with the SPA instead of an API response"
+        )
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/library",
+            "/feeds",
+            "/feeds/create",  # shares its prefix with the public RSS routes
+            "/feeds/1/edit",
+            "/admin/settings",
+            "/auth/profile",
+        ],
+    )
+    def test_spa_routes_still_reach_the_frontend(
+        self, client: TestClient, path: str
+    ):
+        """The fix must not break the actual purpose of the catch-all.
+
+        /feeds/create is the one that matters: an earlier version of this fix
+        treated the whole "feeds/" prefix as API surface and 404'd every
+        client-side route under it, which broke feed creation entirely.
+        """
+        response = client.get(path, follow_redirects=False)
+        # 200 with the SPA, or 503 when it has not been built -- either way it
+        # was handled as a frontend route, not rejected as an API path.
+        assert response.status_code in (200, 503), (
+            f"{path} is a client-side route but was answered "
+            f"{response.status_code}"
+        )
