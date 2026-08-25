@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ...config import settings
 from ...database import get_db
 from ...dependencies import get_current_active_user, require_admin
-from ...models import Book, DownloadQueue, DownloadStatus, DownloadType, User
+from ...models import Book, BookSource, DownloadQueue, DownloadStatus, DownloadType, User
 from ...schemas import DatabaseId
 from ...services.book_download import BookDownloadService
 
@@ -98,7 +98,21 @@ async def list_books(
         query = query.filter(Book.download_unavailable == True)
 
     if source:
-        query = query.filter(Book.source == source)
+        # Comparing a raw query string against an enum column is a Postgres
+        # DataError ("invalid input value for enum booksource"), i.e. a 500.
+        # SQLite does not enforce enum types and silently matched nothing, so
+        # this only ever failed against the production dialect.
+        try:
+            source_value = BookSource(source)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invalid source {source!r}. "
+                    f"Expected one of: {', '.join(s.value for s in BookSource)}"
+                ),
+            )
+        query = query.filter(Book.source == source_value)
 
     if series_filter == "series":
         query = query.filter(Book.series.isnot(None))

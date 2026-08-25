@@ -79,6 +79,50 @@ class TestEnumParameters:
         assert response.json()["role"] == "admin"
 
 
+class TestEnumQueryParameters:
+    """Enum-valued *query* parameters compared straight against enum columns.
+
+    This class is dialect-sensitive in a way the others are not. SQLite does not
+    enforce enum types, so an invalid value silently matched no rows and the
+    endpoint returned 200; PostgreSQL raises DataError and the same request is a
+    500. It was caught only by the PostgreSQL CI job.
+
+    These assertions hold on both dialects, because the value is now validated
+    before it reaches the query.
+    """
+
+    @pytest.mark.parametrize("value", ["null", "nonsense", "AUDIBLE!", "0"])
+    def test_invalid_book_source_is_rejected(
+        self, authenticated_client: TestClient, value: str
+    ):
+        response = authenticated_client.get(f"/api/v2/books?source={value}")
+        assert response.status_code == 400, (
+            f"source={value!r} produced {response.status_code}; on PostgreSQL an "
+            "unvalidated value is a DataError and therefore a 500"
+        )
+
+    @pytest.mark.parametrize("value", ["audible", "imported"])
+    def test_valid_book_source_still_filters(
+        self, authenticated_client: TestClient, make_book, value: str
+    ):
+        from app.models import BookSource
+
+        make_book(source=BookSource(value))
+        make_book(source=BookSource("imported" if value == "audible" else "audible"))
+
+        body = authenticated_client.get(f"/api/v2/books?source={value}").json()
+        assert body["total"] == 1
+        assert body["books"][0]["source"] == value
+
+    def test_empty_source_means_no_filter(
+        self, authenticated_client: TestClient, make_book
+    ):
+        make_book()
+        response = authenticated_client.get("/api/v2/books?source=")
+        assert response.status_code == 200
+        assert response.json()["total"] == 1
+
+
 class TestDateParameters:
     """`date_from`/`date_to` are free-form strings parsed with strptime."""
 
