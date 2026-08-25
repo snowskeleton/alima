@@ -3,7 +3,7 @@
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
@@ -24,7 +24,7 @@ async def get_job(
     """Get current status of a background job."""
     job = db.query(BackgroundJob).filter(BackgroundJob.id == job_id).first()
     if not job:
-        return {"error": "Job not found"}, 404
+        raise HTTPException(status_code=404, detail="Job not found")
 
     return {
         "id": job.id,

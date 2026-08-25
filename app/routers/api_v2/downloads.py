@@ -233,7 +233,7 @@ async def retry_download(
     """Reset a download to PENDING for scheduler pickup."""
     entry = db.query(DownloadQueue).filter(DownloadQueue.id == queue_id).first()
     if not entry:
-        return {"error": "Entry not found"}, 404
+        raise HTTPException(status_code=404, detail="Entry not found")
 
     entry.status = DownloadStatus.PENDING
     entry.error_message = None
@@ -263,7 +263,7 @@ async def remove_download(
     """Remove a download queue entry."""
     entry = db.query(DownloadQueue).filter(DownloadQueue.id == queue_id).first()
     if not entry:
-        return {"error": "Entry not found"}, 404
+        raise HTTPException(status_code=404, detail="Entry not found")
     db.delete(entry)
     db.commit()
     return {"success": True}
@@ -279,7 +279,7 @@ async def patch_download(
     """Mark read/unread."""
     entry = db.query(DownloadQueue).filter(DownloadQueue.id == queue_id).first()
     if not entry:
-        return {"error": "Entry not found"}, 404
+        raise HTTPException(status_code=404, detail="Entry not found")
 
     if "read" in body:
         entry.read = body["read"]

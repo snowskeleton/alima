@@ -312,7 +312,7 @@ def make_queue_entry(test_db: Session):
             book_id=book.id,
             audible_account_id=account.id,
             asin=book.asin or "ASINDEFAULT",
-            download_type=DownloadType.AUDIO,
+            download_type=DownloadType.BOOK,
             status=DownloadStatus.PENDING,
             created_at=datetime.utcnow(),
         )
