@@ -1,0 +1,13 @@
+# Test and CI tooling. Deliberately NOT in requirements.txt: the Dockerfile
+# installs only the production file, so none of this ships in the image.
+#
+# Install with:  pip install -r requirements.txt -r requirements-dev.txt
+
+-r requirements.txt
+
+# Coverage measurement and the diff-coverage gate used in CI
+pytest-cov==7.0.0
+diff-cover==9.2.4
+
+# Property-based API testing driven by the app's own OpenAPI schema
+schemathesis==4.25.2
