@@ -185,8 +185,10 @@ class TestCreateFeed:
         body = authenticated_client.post(
             "/api/v2/feeds", data={"name": "Tom's Picks!", "feed_type": "manual"}
         ).json()
-        slug_stem = body["slug"].rsplit("-", 1)[0]
-        assert slug_stem == "toms-picks"
+        # startswith rather than splitting off the suffix: the uniqueness token
+        # is URL-safe base64 and can itself contain "-", so rsplit("-", 1) picks
+        # the wrong boundary roughly one run in ten.
+        assert body["slug"].startswith("toms-picks-"), body["slug"]
 
     def test_smart_feed_stores_its_filters(
         self, authenticated_client: TestClient, test_db: Session

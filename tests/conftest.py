@@ -15,6 +15,7 @@ os.environ["SMTP_FROM"] = ""
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
+from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base, get_db
@@ -22,27 +23,42 @@ from app.main import app
 from app.models import User, UserRole
 
 
-# Use shared in-memory SQLite for tests
-# Important: Use file: with cache=shared to share the database across connections
-TEST_DATABASE_URL = "sqlite:///file:test_db?mode=memory&cache=shared&uri=true"
+# Shared in-memory SQLite by default: file: with cache=shared so the database is
+# visible across connections.
+#
+# Overridable via TEST_DATABASE_URL so CI can run the same suite against
+# Postgres, which is what production uses. SQLite and Postgres disagree about
+# enough -- constraint timing, JSON columns, integer width, case sensitivity --
+# that a suite which only ever sees SQLite will miss real bugs.
+SQLITE_TEST_URL = "sqlite:///file:test_db?mode=memory&cache=shared&uri=true"
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL") or SQLITE_TEST_URL
+
+RUNNING_ON_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
 
 
 @pytest.fixture(scope="function")
 def test_engine():
     """Create a test database engine."""
-    engine = create_engine(
-        TEST_DATABASE_URL,
-        connect_args={"check_same_thread": False, "uri": True},
-    )
+    if RUNNING_ON_SQLITE:
+        engine = create_engine(
+            TEST_DATABASE_URL,
+            connect_args={"check_same_thread": False, "uri": True},
+        )
+    else:
+        # Each test gets a clean schema, so pooling connections between tests
+        # only risks holding a transaction open across the drop_all below.
+        engine = create_engine(TEST_DATABASE_URL, poolclass=NullPool)
 
     # SQLite ignores foreign keys unless asked. Production runs PostgreSQL, which
     # always enforces them, so turn them on here to keep the test database honest
     # about ON DELETE CASCADE.
-    @event.listens_for(engine, "connect")
-    def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+    if RUNNING_ON_SQLITE:
+
+        @event.listens_for(engine, "connect")
+        def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
 
     Base.metadata.create_all(bind=engine)
     yield engine

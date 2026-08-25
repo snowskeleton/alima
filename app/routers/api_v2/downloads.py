@@ -128,7 +128,7 @@ async def list_downloads(
     status_filter: Optional[str] = Query(None, alias="status"),
     read_status: str = Query("unread"),
     account: Optional[str] = Query(None),
-    book_id: Optional[int] = Query(None),
+    book_id: Optional[int] = Query(None, ge=1, le=2**63 - 1),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     sort: str = Query("created_at"),

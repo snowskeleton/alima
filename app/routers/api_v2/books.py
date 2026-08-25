@@ -62,7 +62,10 @@ async def list_books(
     sort: str = Query("added_at"),
     order: str = Query("desc"),
     limit: int = Query(50, le=200),
-    offset: int = Query(0, ge=0),
+    # Upper bound for the same reason as DatabaseId: an offset wider than a
+    # 64-bit integer overflows the database driver instead of returning an
+    # empty page.
+    offset: int = Query(0, ge=0, le=2**63 - 1),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
