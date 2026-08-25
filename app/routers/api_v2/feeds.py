@@ -156,6 +156,19 @@ async def get_feed(
     if not feed:
         raise HTTPException(status_code=404, detail="Feed not found")
 
+    # Readable if it is public, if you own it, or if you are an admin looking at
+    # a system feed -- the same rule list_feeds filters on and that every other
+    # per-feed endpoint enforces. Without this, a private feed and its book list
+    # were readable by any authenticated user who guessed the id, even though
+    # list_feeds correctly hid it from them.
+    is_admin = current_user.role.value == "admin"
+    if (
+        not feed.is_public
+        and feed.user_id != current_user.id
+        and not (is_admin and feed.is_system)
+    ):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
     domain = SettingsService.get_domain(db)
     data = _feed_to_dict(feed, domain)
 
@@ -256,6 +269,22 @@ async def add_book_to_feed(
     book_id = body.get("book_id")
     if not book_id:
         raise HTTPException(status_code=400, detail="book_id required")
+
+    # Check the book exists before inserting. Postgres enforces the foreign key,
+    # so an unknown id raised IntegrityError and surfaced as a 500 rather than
+    # telling the caller what was wrong.
+    if not db.query(Book).filter(Book.id == book_id).first():
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found")
+
+    # Guard against adding the same book twice: the position counter is derived
+    # from the row count, so a duplicate would land on a colliding position.
+    already_present = (
+        db.query(FeedBook)
+        .filter(FeedBook.feed_id == feed_id, FeedBook.book_id == book_id)
+        .first()
+    )
+    if already_present:
+        return {"success": True, "already_present": True}
 
     max_pos = db.query(FeedBook).filter(FeedBook.feed_id == feed_id).count()
     fb = FeedBook(feed_id=feed_id, book_id=book_id, position=max_pos)

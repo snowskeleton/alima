@@ -194,3 +194,148 @@ def user_api_key(test_db: Session, test_user: User) -> str:
 def admin_api_key(test_db: Session, test_admin: User) -> str:
     """Raw API key belonging to the admin test user."""
     return issue_api_key(test_db, test_admin, "admin key")
+
+
+# ---------------------------------------------------------------------------
+# Domain fixtures
+#
+# Factories rather than bare fixtures: most router tests need several books or
+# feeds with differing attributes, and a single fixed instance forces tests to
+# mutate shared state to say what they mean.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def make_book(test_db: Session):
+    """Create a Book. Only `title` is really required; the rest has defaults."""
+    from datetime import datetime
+
+    from app.models import Book, BookSource, MetadataSource
+
+    created = []
+
+    def _make(**overrides):
+        now = datetime.utcnow()
+        defaults = dict(
+            title=f"Book {len(created) + 1}",
+            author="An Author",
+            asin=f"ASIN{len(created) + 1:08d}",
+            source=BookSource.AUDIBLE,
+            metadata_source=MetadataSource.AUDIBLE,
+            last_metadata_update=now,
+            added_at=now,
+            last_modified=now,
+        )
+        book = Book(**{**defaults, **overrides})
+        test_db.add(book)
+        test_db.commit()
+        test_db.refresh(book)
+        created.append(book)
+        return book
+
+    return _make
+
+
+@pytest.fixture
+def test_book(make_book):
+    return make_book()
+
+
+@pytest.fixture
+def make_feed(test_db: Session):
+    """Create a Feed owned by a given user."""
+    from datetime import datetime
+
+    from app.models import Feed, FeedType
+
+    created = []
+
+    def _make(owner, **overrides):
+        now = datetime.utcnow()
+        n = len(created) + 1
+        defaults = dict(
+            user_id=owner.id,
+            name=f"Feed {n}",
+            feed_type=FeedType.MANUAL,
+            slug=f"feed-{n}",
+            is_public=False,
+            created_at=now,
+            updated_at=now,
+        )
+        feed = Feed(**{**defaults, **overrides})
+        test_db.add(feed)
+        test_db.commit()
+        test_db.refresh(feed)
+        created.append(feed)
+        return feed
+
+    return _make
+
+
+@pytest.fixture
+def make_account(test_db: Session):
+    """Create an AudibleAccount."""
+    from datetime import datetime
+
+    from app.models import AudibleAccount
+
+    created = []
+
+    def _make(**overrides):
+        n = len(created) + 1
+        defaults = dict(
+            username=f"account{n}@example.com",
+            auth_file_path=f"account{n}.json",
+            activation_bytes="deadbeef",
+            marketplace="us",
+            added_at=datetime.utcnow(),
+        )
+        account = AudibleAccount(**{**defaults, **overrides})
+        test_db.add(account)
+        test_db.commit()
+        test_db.refresh(account)
+        created.append(account)
+        return account
+
+    return _make
+
+
+@pytest.fixture
+def make_queue_entry(test_db: Session):
+    """Create a DownloadQueue entry for a book/account pair."""
+    from datetime import datetime
+
+    from app.models import DownloadQueue, DownloadStatus, DownloadType
+
+    def _make(book, account, **overrides):
+        defaults = dict(
+            book_id=book.id,
+            audible_account_id=account.id,
+            asin=book.asin or "ASINDEFAULT",
+            download_type=DownloadType.AUDIO,
+            status=DownloadStatus.PENDING,
+            created_at=datetime.utcnow(),
+        )
+        entry = DownloadQueue(**{**defaults, **overrides})
+        test_db.add(entry)
+        test_db.commit()
+        test_db.refresh(entry)
+        return entry
+
+    return _make
+
+
+@pytest.fixture
+def second_user(test_db: Session) -> User:
+    """A second regular user, for cross-tenant permission tests."""
+    user = User(email="other@example.com", role=UserRole.USER)
+    test_db.add(user)
+    test_db.commit()
+    test_db.refresh(user)
+    return user
+
+
+@pytest.fixture
+def json_headers():
+    """Force JSON error responses rather than browser login redirects."""
+    return {"Accept": "application/json"}
