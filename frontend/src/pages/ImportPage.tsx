@@ -110,10 +110,11 @@ export function ImportPage() {
       {(!job || job.status === 'failed') && (
         <form onSubmit={handleSubmit} className="space-y-4 bg-white p-6 rounded-lg border border-gray-200">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="import-audio-file" className="block text-sm font-medium text-gray-700 mb-1">
               Audio File
             </label>
             <input
+              id="import-audio-file"
               ref={fileInputRef}
               type="file"
               accept=".m4a,.m4b,.mp3"
@@ -147,8 +148,9 @@ export function ImportPage() {
           </div>
           <Input label="Publisher" value={publisher} onChange={(e) => setPublisher(e.target.value)} />
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <label htmlFor="import-description" className="block text-sm font-medium text-gray-700 mb-1">Description</label>
             <textarea
+              id="import-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
