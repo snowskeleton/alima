@@ -8,7 +8,7 @@ cannot, which is why all four exist.
 | Backend unit/contract | `tests/` | ~30s | Handler logic, permissions, service decisions |
 | Route inventory | `tests/test_route_inventory.py` | <1s | Endpoints added without auth |
 | Schema fuzzing | `tests/test_openapi_fuzz.py` | ~20s | Unhandled 500s, schema drift |
-| Frontend unit | `frontend/src/**/*.test.tsx` | ~1s | Component and API-client behaviour |
+| Frontend unit | `frontend/src/**/*.test.tsx` | ~3s | Page behaviour, and every control that calls the API |
 | End-to-end | `e2e/` | ~4s | The SPA and the API disagreeing |
 
 ## Setup
@@ -119,6 +119,64 @@ something new fails until its handler is written.
 Test pages, not `ui/` primitives. `Button` renders a button; that is not worth a
 test. Whether the library page distinguishes "your search matched nothing" from
 "your library is empty" is.
+
+#### Testing that a button is wired up
+
+The largest category of frontend bug in an app like this is a control that looks
+right and calls the wrong thing: the wrong endpoint, an inverted boolean, an id
+belonging to the neighbouring row. None of it is visible on screen, and none of
+it is caught by asserting that the button rendered.
+
+So every control that talks to the backend gets a test asserting **the request
+it produced** — method, URL and body. `src/test/record.ts` provides the tooling:
+
+```tsx
+it('sends download_enabled: false when disabling auto-download', async () => {
+  showBook({ id: 7, download_enabled: true });
+  const calls = recordRequests('patch', '/api/v2/books/7');
+
+  render();
+  await userEvent.click(await screen.findByRole('button', { name: /disable auto-download/i }));
+
+  await waitFor(() => expect(calls).toHaveLength(1));
+  expect(calls[0].body).toEqual({ download_enabled: false });
+});
+```
+
+`recordRequests(method, path, response?, {status}?)` installs an MSW handler,
+returns the array it records into, and decodes multipart bodies so the upload
+forms can be asserted on like any other. `lastRequest(calls)` reads the most
+recent one — the repo targets ES2020, where `Array.prototype.at` does not exist.
+
+Four things are worth asserting per control, and roughly in this order:
+
+1. **It reaches the right endpoint.** `/books/7/file` and `/books/7` differ by
+   one path segment, and one of them destroys the library row.
+2. **The payload is right, in both directions.** A toggle needs a test for each
+   state: the label and the body come from the same flag, and inverting one
+   without the other is the mistake that actually happens.
+3. **The confirmation is load-bearing.** Every `confirm()` gets a pair — sends
+   on accept, sends *nothing* on dismiss. `stubConfirm(false)` is the second.
+4. **It is not offered when it cannot work.** Assert the negative: no Retry on a
+   pending download, no Delete Book for a non-admin. A control that appears and
+   then 403s is worse than one that never appeared.
+
+For anything not talking to the backend — a clipboard copy, a filter that sorts
+an in-memory list, a modal opening — assert the visible outcome and stop there.
+Testing "every button" exhaustively is not the goal; testing every button whose
+failure is silent is.
+
+`renderWithProviders` supports the bits pages need: `route`/`path` for URL
+params, `auth` to seed the auth query the way the app shell would have,
+`currentPath()` to assert navigation, `inModal()` to disambiguate a modal's
+submit button from the one that opened it, and `attachFile()` for file inputs.
+Note that a click on a submit button next to a `required` file input is
+swallowed by jsdom's constraint validation — submit the form directly.
+
+`setup.ts` pins `fetch`, `FormData`, `Request`, `Response` and `Headers` to one
+undici realm. Without it a jsdom `FormData` handed to Node's fetch degrades to
+the literal string `"[object FormData]"`, and no multipart upload in the app is
+testable at all.
 
 ### End-to-end
 
