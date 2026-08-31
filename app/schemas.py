@@ -1,7 +1,9 @@
 """Pydantic schemas for request/response validation."""
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
+
+from fastapi import Path
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -225,3 +227,19 @@ class TokenData(BaseModel):
 
     email: Optional[str] = None
     user_id: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# Shared path-parameter types
+# ---------------------------------------------------------------------------
+
+#: A primary-key path parameter.
+#:
+#: The upper bound is not cosmetic. A URL like /api/v2/books/99999999999999999999
+#: is a valid Python int, so without a bound it reaches the database driver and
+#: raises OverflowError ("Python int too large to convert to SQLite INTEGER")
+#: rather than simply matching no rows — a 500 on what is plainly a client error.
+#: Declaring the range makes FastAPI answer 422, and makes the OpenAPI document
+#: state the real constraint so generated clients and schema-driven tests agree
+#: with the implementation.
+DatabaseId = Annotated[int, Path(ge=1, le=2**63 - 1)]

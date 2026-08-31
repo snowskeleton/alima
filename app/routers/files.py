@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..database import get_db
 from ..models import Book
+from ..schemas import DatabaseId
 from ..services.storage import get_storage_service
 from ..utils.media_types import audio_media_type
 
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/files", tags=["Files"])
 @router.get("/audiobooks/{book_id}.{ext}")
 @router.head("/audiobooks/{book_id}.{ext}", include_in_schema=False)
 async def serve_audiobook(
-    book_id: int,
+    book_id: DatabaseId,
     ext: str,
     db: Session = Depends(get_db),
 ):
@@ -155,7 +156,10 @@ async def serve_cover(filepath: str):
             detail="Invalid file path",
         )
 
-    if not file_path.exists():
+    # is_file() rather than exists(): a directory under covers/ exists but is not
+    # servable, and handing one to FileResponse raises RuntimeError — a 500 on a
+    # public, unauthenticated endpoint. Treat it as a miss.
+    if not file_path.is_file():
         # Local file is gone — fall back to B2 if it's configured. The B2 key
         # for a cover is always its path relative to the data dir.
         storage = get_storage_service()
@@ -173,7 +177,7 @@ async def serve_cover(filepath: str):
         ".jpg": "image/jpeg",
         ".jpeg": "image/jpeg",
         ".png": "image/png",
-        ".gif": "image/webp",
+        ".gif": "image/gif",
         ".webp": "image/webp",
     }
     media_type = media_types.get(ext, "application/octet-stream")

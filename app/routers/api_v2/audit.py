@@ -19,6 +19,7 @@ from ...config import settings
 from ...database import SessionLocal, get_db
 from ...dependencies import require_admin
 from ...models import AuditResult, AuditRun, AuditStatus, Book, User
+from ...schemas import DatabaseId
 from ...services.metadata import MetadataService
 
 logger = logging.getLogger(__name__)
@@ -239,7 +240,7 @@ async def _audit_progress_generator(audit_id: int, db: Session):
 
 @router.get("/stream/{audit_id}")
 async def stream_audit(
-    audit_id: int,
+    audit_id: DatabaseId,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -249,7 +250,7 @@ async def stream_audit(
 
 @router.get("/results/{audit_id}")
 async def get_results(
-    audit_id: int,
+    audit_id: DatabaseId,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):

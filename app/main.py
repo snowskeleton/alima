@@ -106,6 +106,41 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class RejectNullBytesMiddleware(BaseHTTPMiddleware):
+    """Reject requests whose path or query string contains a NUL byte.
+
+    PostgreSQL cannot store NUL inside a text value, and psycopg2 refuses to
+    send one at all:
+
+        ValueError: A string literal cannot contain NUL (0x00) characters.
+
+    That is raised while building the query, so any user-supplied string that
+    reaches the database takes down the request with a 500. SQLite accepts NUL
+    without complaint, which is why this only ever failed in production.
+
+    Handled here rather than per-endpoint on purpose: every string parameter on
+    every route is a candidate, including ones not written yet, so validating at
+    the edge is the only version of this fix that stays fixed. A NUL byte in a
+    URL is never legitimate, so it is a flat 400.
+    """
+
+    async def dispatch(self, request, call_next):
+        # query_params, not scope["query_string"]: the raw scope value is still
+        # percent-encoded, so a NUL arrives as the literal text "%00" and a byte
+        # comparison against it never matches. Starlette decodes query_params
+        # and scope["path"], which is what actually reaches the handlers.
+        has_null = "\x00" in request.scope.get("path", "") or any(
+            "\x00" in key or "\x00" in value
+            for key, value in request.query_params.multi_items()
+        )
+        if has_null:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"detail": "Request contains a NUL byte"},
+            )
+        return await call_next(request)
+
+
 class NoIndexMiddleware(BaseHTTPMiddleware):
     """
     Middleware to add X-Robots-Tag header to all responses.
@@ -286,6 +321,9 @@ app.add_middleware(HTTPSRedirectMiddleware)
 # Add X-Robots-Tag header to prevent search engine indexing
 app.add_middleware(NoIndexMiddleware)
 
+# Reject NUL bytes before anything can pass them to the database
+app.add_middleware(RejectNullBytesMiddleware)
+
 # Trust proxy headers (for HTTPS behind reverse proxy)
 app.add_middleware(
     TrustedHostMiddleware,
@@ -398,10 +436,57 @@ _spa_assets_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/assets", StaticFiles(directory=str(_spa_assets_dir)), name="spa-assets")
 
 
+# Prefixes that are exclusively API surface, so an unmatched path under them is
+# a genuine 404 rather than a client-side route.
+#
+# Deliberately does NOT include "feed/" or "feeds/": those serve RSS *and* back
+# SPA routes like /feeds/create, so an unmatched path there belongs to the
+# frontend. Anything under them that is a real backend route is handled by the
+# 405 branch below, which does not depend on this list.
+_API_ONLY_PREFIXES = ("api/", "files/", "openapi.json")
+
+
+def _allowed_methods_for(request: Request) -> set[str]:
+    """Methods other routes accept for this path.
+
+    A route that matches the path but not the method reports Match.PARTIAL, so
+    a non-empty result here means the path exists and the method is wrong --
+    405 rather than 404.
+    """
+    from starlette.routing import Match
+
+    allowed: set[str] = set()
+    for route in app.router.routes:
+        if getattr(route, "name", None) == "spa_catch_all":
+            continue
+        match, _ = route.matches(request.scope)
+        if match == Match.PARTIAL:
+            allowed |= getattr(route, "methods", None) or set()
+    return allowed
+
+
 @app.get("/{full_path:path}", tags=["SPA"])
 async def spa_catch_all(request: Request, full_path: str):
     """Serve React SPA for all unmatched routes."""
     from starlette.responses import FileResponse
+
+    # A real route exists at this path under another method. Answer 405 whatever
+    # the prefix: serving the SPA here told an API client its GET had succeeded.
+    allowed = _allowed_methods_for(request)
+    if allowed:
+        return JSONResponse(
+            status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+            content={"detail": "Method Not Allowed"},
+            headers={"Allow": ", ".join(sorted(allowed))},
+        )
+
+    # No route at all. Under an API-only prefix that is a 404; anywhere else it
+    # is a client-side route and belongs to the SPA.
+    if full_path.startswith(_API_ONLY_PREFIXES):
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"detail": "Not Found"},
+        )
 
     spa_index = _spa_dir / "index.html"
     if spa_index.exists():

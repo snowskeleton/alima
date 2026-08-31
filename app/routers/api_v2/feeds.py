@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...dependencies import get_current_active_user, get_optional_user, require_admin
 from ...models import Book, Feed, FeedBook, FeedType, User
+from ...schemas import DatabaseId
 from ...services.image_processor import ImageProcessorService
 from ...services.settings_service import SettingsService
 from ...utils.tokens import generate_invite_token
@@ -78,13 +79,32 @@ async def create_feed(
     cover_image_path = None
     if cover_image and cover_image.filename:
         image_processor = ImageProcessorService()
-        cover_image_path = await image_processor.process_feed_cover(cover_image)
+        try:
+            cover_image_path = await image_processor.process_feed_cover(cover_image)
+        except ValueError as e:
+            # Pillow could not read it, or the format isn't allowed. Both are the
+            # uploader's problem, not a server fault.
+            raise HTTPException(status_code=400, detail=str(e))
+
+    # FeedType() on an arbitrary form value raises ValueError, which surfaces as
+    # a 500. A bad enum value is client error, so answer 422 like the rest of the
+    # request-validation layer does.
+    try:
+        parsed_feed_type = FeedType(feed_type)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid feed_type {feed_type!r}. "
+                f"Expected one of: {', '.join(t.value for t in FeedType)}"
+            ),
+        )
 
     feed = Feed(
         user_id=current_user.id,
         name=name,
         description=description,
-        feed_type=FeedType(feed_type),
+        feed_type=parsed_feed_type,
         filter_criteria=filter_criteria,
         is_public=is_public,
         cover_image_path=cover_image_path,
@@ -127,7 +147,7 @@ async def get_feed_by_slug(
 
 @router.get("/{feed_id}")
 async def get_feed(
-    feed_id: int,
+    feed_id: DatabaseId,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
@@ -135,6 +155,19 @@ async def get_feed(
     feed = db.query(Feed).filter(Feed.id == feed_id).first()
     if not feed:
         raise HTTPException(status_code=404, detail="Feed not found")
+
+    # Readable if it is public, if you own it, or if you are an admin looking at
+    # a system feed -- the same rule list_feeds filters on and that every other
+    # per-feed endpoint enforces. Without this, a private feed and its book list
+    # were readable by any authenticated user who guessed the id, even though
+    # list_feeds correctly hid it from them.
+    is_admin = current_user.role.value == "admin"
+    if (
+        not feed.is_public
+        and feed.user_id != current_user.id
+        and not (is_admin and feed.is_system)
+    ):
+        raise HTTPException(status_code=403, detail="Permission denied")
 
     domain = SettingsService.get_domain(db)
     data = _feed_to_dict(feed, domain)
@@ -149,7 +182,7 @@ async def get_feed(
 
 @router.put("/{feed_id}")
 async def update_feed(
-    feed_id: int,
+    feed_id: DatabaseId,
     name: str = Form(...),
     description: str = Form(None),
     is_public: bool = Form(True),
@@ -171,7 +204,10 @@ async def update_feed(
         image_processor = ImageProcessorService()
         if feed.cover_image_path:
             image_processor.delete_cover(feed.cover_image_path)
-        feed.cover_image_path = await image_processor.process_feed_cover(cover_image)
+        try:
+            feed.cover_image_path = await image_processor.process_feed_cover(cover_image)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     feed.name = name
     feed.description = description
@@ -198,7 +234,7 @@ async def update_feed(
 
 @router.delete("/{feed_id}")
 async def delete_feed(
-    feed_id: int,
+    feed_id: DatabaseId,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
@@ -216,7 +252,7 @@ async def delete_feed(
 
 @router.post("/{feed_id}/books")
 async def add_book_to_feed(
-    feed_id: int,
+    feed_id: DatabaseId,
     body: dict,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -234,6 +270,22 @@ async def add_book_to_feed(
     if not book_id:
         raise HTTPException(status_code=400, detail="book_id required")
 
+    # Check the book exists before inserting. Postgres enforces the foreign key,
+    # so an unknown id raised IntegrityError and surfaced as a 500 rather than
+    # telling the caller what was wrong.
+    if not db.query(Book).filter(Book.id == book_id).first():
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found")
+
+    # Guard against adding the same book twice: the position counter is derived
+    # from the row count, so a duplicate would land on a colliding position.
+    already_present = (
+        db.query(FeedBook)
+        .filter(FeedBook.feed_id == feed_id, FeedBook.book_id == book_id)
+        .first()
+    )
+    if already_present:
+        return {"success": True, "already_present": True}
+
     max_pos = db.query(FeedBook).filter(FeedBook.feed_id == feed_id).count()
     fb = FeedBook(feed_id=feed_id, book_id=book_id, position=max_pos)
     db.add(fb)
@@ -243,8 +295,8 @@ async def add_book_to_feed(
 
 @router.delete("/{feed_id}/books/{book_id}")
 async def remove_book_from_feed(
-    feed_id: int,
-    book_id: int,
+    feed_id: DatabaseId,
+    book_id: DatabaseId,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
@@ -266,7 +318,7 @@ async def remove_book_from_feed(
 
 @router.patch("/{feed_id}")
 async def patch_feed(
-    feed_id: int,
+    feed_id: DatabaseId,
     body: dict,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -286,7 +338,7 @@ async def patch_feed(
 
 @router.delete("/{feed_id}/cover")
 async def remove_cover(
-    feed_id: int,
+    feed_id: DatabaseId,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):

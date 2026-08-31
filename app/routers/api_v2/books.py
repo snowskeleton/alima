@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 from ...config import settings
 from ...database import get_db
 from ...dependencies import get_current_active_user, require_admin
-from ...models import Book, DownloadQueue, DownloadStatus, DownloadType, User
+from ...models import Book, BookSource, DownloadQueue, DownloadStatus, DownloadType, User
+from ...schemas import DatabaseId
 from ...services.book_download import BookDownloadService
 
 router = APIRouter(prefix="/books", tags=["Books"])
@@ -60,8 +61,13 @@ async def list_books(
     series_filter: Optional[str] = Query(None),
     sort: str = Query("added_at"),
     order: str = Query("desc"),
-    limit: int = Query(50, le=200),
-    offset: int = Query(0, ge=0),
+    # Without a lower bound a negative limit reaches the database verbatim;
+    # SQLite reads it as "no limit" but PostgreSQL rejects it with a 500.
+    limit: int = Query(50, ge=1, le=200),
+    # Upper bound for the same reason as DatabaseId: an offset wider than a
+    # 64-bit integer overflows the database driver instead of returning an
+    # empty page.
+    offset: int = Query(0, ge=0, le=2**63 - 1),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
@@ -94,7 +100,21 @@ async def list_books(
         query = query.filter(Book.download_unavailable == True)
 
     if source:
-        query = query.filter(Book.source == source)
+        # Comparing a raw query string against an enum column is a Postgres
+        # DataError ("invalid input value for enum booksource"), i.e. a 500.
+        # SQLite does not enforce enum types and silently matched nothing, so
+        # this only ever failed against the production dialect.
+        try:
+            source_value = BookSource(source)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invalid source {source!r}. "
+                    f"Expected one of: {', '.join(s.value for s in BookSource)}"
+                ),
+            )
+        query = query.filter(Book.source == source_value)
 
     if series_filter == "series":
         query = query.filter(Book.series.isnot(None))
@@ -192,7 +212,7 @@ async def bulk_action(
 
 @router.get("/{book_id}")
 async def get_book(
-    book_id: int,
+    book_id: DatabaseId,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
@@ -225,7 +245,7 @@ async def get_book(
 
 @router.put("/{book_id}/metadata")
 async def update_metadata(
-    book_id: int,
+    book_id: DatabaseId,
     body: dict,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -249,7 +269,7 @@ async def update_metadata(
 
 @router.delete("/{book_id}/metadata")
 async def reset_metadata(
-    book_id: int,
+    book_id: DatabaseId,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -266,7 +286,7 @@ async def reset_metadata(
 
 @router.post("/{book_id}/download")
 async def download_book(
-    book_id: int,
+    book_id: DatabaseId,
     force: bool = Query(False, description="Re-queue even if an entry is already in flight"),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -282,7 +302,7 @@ async def download_book(
 
 @router.post("/{book_id}/unmatch")
 async def unmatch_book(
-    book_id: int,
+    book_id: DatabaseId,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
@@ -321,7 +341,7 @@ async def unmatch_book(
 
 @router.delete("/{book_id}/file")
 async def delete_file(
-    book_id: int,
+    book_id: DatabaseId,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
@@ -351,7 +371,7 @@ async def delete_file(
 
 @router.delete("/{book_id}")
 async def delete_book(
-    book_id: int,
+    book_id: DatabaseId,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -387,7 +407,7 @@ async def delete_book(
 
 @router.patch("/{book_id}")
 async def patch_book(
-    book_id: int,
+    book_id: DatabaseId,
     body: dict,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),

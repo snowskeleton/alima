@@ -1,0 +1,215 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes the running job obsolete.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.14'
+  NODE_VERSION: '22'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Fast feedback: the whole backend suite on SQLite, ~30s.
+  # ---------------------------------------------------------------------------
+  backend:
+    name: Backend (SQLite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # diff-cover needs the merge base to work out which lines are new.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        env:
+          # Any test touching get_cached_setting() opens a real session against
+          # DATABASE_URL. Without a reachable value it blocks on connect with no
+          # timeout, and the suite hangs with zero output rather than failing.
+          DATABASE_URL: sqlite:///./ci-scratch.db
+          # No .env in CI. secret_key is the only validated setting, but the
+          # data paths default to /app/data/... which does not exist on a
+          # runner, so point them at the workspace.
+          SECRET_KEY: ci-secret-key-not-used-for-anything-real-32
+          AUDIOBOOKS_PATH: ${{ github.workspace }}/.ci-data/audiobooks
+          COVERS_PATH: ${{ github.workspace }}/.ci-data/covers
+          AUDIBLE_AUTH_PATH: ${{ github.workspace }}/.ci-data/auth
+          TEMP_PATH: ${{ github.workspace }}/.ci-data/temp
+        run: |
+          pytest tests/ \
+            --cov=app \
+            --cov-report=xml \
+            --cov-report=term-missing:skip-covered \
+            --cov-fail-under=47
+
+      # Note: the floor is 47 rather than the ~48.5 measured on a dev machine.
+      # Total coverage shifts by a few tenths of a point with the configured
+      # data paths, so a floor set at the observed local number fails on a
+      # runner. The floor is a ratchet against backsliding; diff-cover below is
+      # the gate that actually reflects the change under review.
+      - name: Check coverage of changed lines
+        # The number that actually drives behaviour. Total coverage barely moves
+        # and nobody acts on it; "you added 40 lines and 12 are untested, here
+        # they are" is something a reviewer can do something about.
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags origin ${{ github.base_ref }}
+          diff-cover coverage.xml \
+            --compare-branch=origin/${{ github.base_ref }} \
+            --fail-under=80 \
+            --html-report diff-coverage.html
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: |
+            coverage.xml
+            diff-coverage.html
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # The same suite against the database production actually uses. SQLite and
+  # Postgres disagree about constraint timing, JSON columns, integer width and
+  # case sensitivity, so a suite that only sees SQLite will miss real bugs.
+  # ---------------------------------------------------------------------------
+  backend-postgres:
+    name: Backend (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: alima
+          POSTGRES_PASSWORD: alima
+          POSTGRES_DB: alima_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run tests against PostgreSQL
+        env:
+          # conftest.py builds its engine from TEST_DATABASE_URL when set.
+          TEST_DATABASE_URL: postgresql://alima:alima@localhost:5432/alima_test
+          DATABASE_URL: postgresql://alima:alima@localhost:5432/alima_test
+          # No .env in CI. secret_key is the only validated setting, but the
+          # data paths default to /app/data/... which does not exist on a
+          # runner, so point them at the workspace.
+          SECRET_KEY: ci-secret-key-not-used-for-anything-real-32
+          AUDIOBOOKS_PATH: ${{ github.workspace }}/.ci-data/audiobooks
+          COVERS_PATH: ${{ github.workspace }}/.ci-data/covers
+          AUDIBLE_AUTH_PATH: ${{ github.workspace }}/.ci-data/auth
+          TEMP_PATH: ${{ github.workspace }}/.ci-data/temp
+        run: pytest tests/ -q
+
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # `npm install`, not `npm ci`: package-lock.json is gitignored in this
+      # repo (.gitignore:115), so there is no lockfile to install from and no
+      # stable key to cache on. Committing the lockfiles would make CI both
+      # reproducible and faster -- a one-line .gitignore change -- but that
+      # reverses a deliberate repo decision, so it is left alone here.
+      - run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Run tests with coverage
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-coverage
+          path: frontend/coverage
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Kept in its own job so the ~30s unit suites are never held up by browsers.
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Install Node dependencies
+        # See the note in the frontend job: lockfiles are gitignored here.
+        run: |
+          npm install --no-audit --no-fund
+          npm --prefix frontend install --no-audit --no-fund
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run end-to-end tests
+        # scripts/e2e-server.sh builds the SPA, creates a scratch SQLite
+        # database and starts uvicorn against it. sqlite3 reads magic-link
+        # tokens back out; it is preinstalled on ubuntu-latest.
+        run: npx playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

@@ -126,3 +126,14 @@ frontend/dist/
 # Project config (launch.json, agents, commands) is shared and committed.
 # settings.local.json holds per-developer permission grants — keep it local.
 .claude/settings.local.json
+
+# Playwright / E2E scratch
+.e2e/
+test-results/
+playwright-report/
+frontend/coverage/
+.coverage
+coverage.xml
+htmlcov/
+.hypothesis/
+.pytest-scratch.db

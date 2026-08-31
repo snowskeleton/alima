@@ -91,8 +91,9 @@ export function AccountListPage() {
           {uploadError && <Alert type="error">{uploadError}</Alert>}
           <form onSubmit={handleUpload} className="space-y-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+              <label htmlFor="account-username" className="block text-sm font-medium text-gray-700 mb-1">Username</label>
               <input
+                id="account-username"
                 type="text"
                 required
                 value={uploadUsername}
@@ -101,8 +102,9 @@ export function AccountListPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Marketplace</label>
+              <label htmlFor="account-marketplace" className="block text-sm font-medium text-gray-700 mb-1">Marketplace</label>
               <select
+                id="account-marketplace"
                 value={uploadMarketplace}
                 onChange={e => setUploadMarketplace(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
@@ -113,8 +115,9 @@ export function AccountListPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Auth File (.json)</label>
+              <label htmlFor="account-auth-file" className="block text-sm font-medium text-gray-700 mb-1">Auth File (.json)</label>
               <input
+                id="account-auth-file"
                 type="file"
                 accept=".json"
                 required

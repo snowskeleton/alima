@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...dependencies import require_admin, require_admin_session
 from ...models import ApiKey, User
+from ...schemas import DatabaseId
 from ...services.background_jobs import BackgroundJobService
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,7 @@ async def create_api_key(
 
 @router.delete("/api-keys/{key_id}")
 async def delete_api_key(
-    key_id: int,
+    key_id: DatabaseId,
     current_user: User = Depends(require_admin_session),
     db: Session = Depends(get_db),
 ):

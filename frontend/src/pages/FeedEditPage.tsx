@@ -104,7 +104,7 @@ export function FeedEditPage() {
 
         {/* Cover image */}
         <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Cover Image</label>
+          <label htmlFor="feed-cover-image" className="block text-sm font-medium text-gray-700">Cover Image</label>
           {(coverPreview || currentCoverUrl) && (
             <div className="flex items-start gap-3">
               <img
@@ -126,6 +126,7 @@ export function FeedEditPage() {
             </div>
           )}
           <input
+            id="feed-cover-image"
             type="file"
             accept="image/jpeg,image/png,image/webp"
             onChange={handleCoverChange}
