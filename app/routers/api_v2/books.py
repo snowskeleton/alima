@@ -61,7 +61,9 @@ async def list_books(
     series_filter: Optional[str] = Query(None),
     sort: str = Query("added_at"),
     order: str = Query("desc"),
-    limit: int = Query(50, le=200),
+    # Without a lower bound a negative limit reaches the database verbatim;
+    # SQLite reads it as "no limit" but PostgreSQL rejects it with a 500.
+    limit: int = Query(50, ge=1, le=200),
     # Upper bound for the same reason as DatabaseId: an offset wider than a
     # 64-bit integer overflows the database driver instead of returning an
     # empty page.
