@@ -157,7 +157,7 @@ def _login_redirect_url(request: Request) -> str:
 
 async def get_current_user(
     request: Request,
-    session_token: Optional[str] = Cookie(None),
+    session_token: Optional[str] = Cookie(None, include_in_schema=False),
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
@@ -254,7 +254,7 @@ async def require_admin(
 
 async def get_session_user(
     request: Request,
-    session_token: Optional[str] = Cookie(None),
+    session_token: Optional[str] = Cookie(None, include_in_schema=False),
     db: Session = Depends(get_db),
 ) -> User:
     """
@@ -315,7 +315,7 @@ async def require_admin_session(
 
 
 async def get_optional_user(
-    session_token: Optional[str] = Cookie(None),
+    session_token: Optional[str] = Cookie(None, include_in_schema=False),
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> Optional[User]:
