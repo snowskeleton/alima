@@ -540,10 +540,14 @@ class TestFeedSortOrder:
         test_db.commit()
         assert self._feed_titles(alphabet_feed) == ["Zebra", "Mango", "Apple"]
 
-    def test_author_ascending(self, test_db: Session, alphabet_feed):
+    def test_author_orders_run_both_ways(self, test_db: Session, alphabet_feed):
         alphabet_feed.sort_order = "author_asc"
         test_db.commit()
         assert self._feed_titles(alphabet_feed) == ["Apple", "Mango", "Zebra"]
+
+        alphabet_feed.sort_order = "author_desc"
+        test_db.commit()
+        assert self._feed_titles(alphabet_feed) == ["Zebra", "Mango", "Apple"]
 
     def test_purchase_date_orders_run_both_ways(
         self, test_db: Session, alphabet_feed
@@ -582,6 +586,26 @@ class TestFeedSortOrder:
         assert parsed == sorted(parsed, reverse=True), (
             "the first item in an A-Z feed must carry the newest date"
         )
+
+    def test_books_with_no_dates_sort_last_and_still_get_a_pub_date(self):
+        """Defensive: added_at is NOT NULL in the schema, so these Books are
+        built in memory. A missing date must sort last rather than raise, and
+        must still produce some pubDate, since an item without one is invalid
+        RSS."""
+        from datetime import datetime
+
+        from app.models import Book
+        from app.services.feed_generator import FeedGeneratorService
+
+        dated = Book(title="Dated", purchased_at=datetime(2024, 1, 1))
+        undated = Book(title="Undated")
+
+        for order in ("purchase_date_desc", "purchase_date_asc"):
+            ordered = FeedGeneratorService.sort_books([undated, dated], order)
+            assert [b.title for b in ordered] == ["Dated", "Undated"], order
+
+            pub_dates = FeedGeneratorService._item_pub_dates(ordered, order)
+            assert all(d is not None for d in pub_dates), order
 
     def test_smart_feed_defaults_to_newest_purchase_first(
         self, test_db: Session, make_feed, make_book, alice
