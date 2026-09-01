@@ -64,6 +64,7 @@ export function makeFeed(overrides: Record<string, unknown> = {}) {
     is_public: false,
     is_system: false,
     is_pinned: false,
+    sort_order: 'manual',
     cover_image_path: null,
     slug: 'my-library',
     created_at: '2024-01-01T00:00:00',

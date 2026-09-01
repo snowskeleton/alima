@@ -80,4 +80,31 @@ describe('FeedCreatePage', () => {
 
     expect(calls).toHaveLength(0);
   });
+
+  it('defaults to purchase-date order and posts the chosen one', async () => {
+    const calls = recordRequests('post', '/api/v2/feeds', { id: 5 });
+
+    renderWithProviders(<FeedCreatePage />);
+    const order = screen.getByLabelText(/episode order/i);
+    expect(order).toHaveValue('purchase_date_desc');
+
+    await userEvent.type(screen.getByLabelText(/name/i), 'A-Z');
+    await userEvent.selectOptions(order, 'title_asc');
+    await userEvent.click(screen.getByRole('button', { name: /create feed/i }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body.sort_order).toBe('title_asc');
+  });
+
+  it('offers the manual order once the feed type is manual', async () => {
+    renderWithProviders(<FeedCreatePage />);
+    const optionValues = () =>
+      Array.from(screen.getByLabelText(/episode order/i).querySelectorAll('option'))
+        .map(o => o.value);
+
+    expect(optionValues()).not.toContain('manual');
+    await userEvent.selectOptions(screen.getByLabelText(/type/i), 'manual');
+    expect(optionValues()).toContain('manual');
+  });
+
 });

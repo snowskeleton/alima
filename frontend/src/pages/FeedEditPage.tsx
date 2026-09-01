@@ -5,6 +5,8 @@ import { apiFetch } from '../api/client';
 import { PageSpinner } from '../components/ui/Spinner';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { type FeedSortOrder } from '../api/types';
+import { FeedSortOrderSelect } from '../components/feeds/FeedSortOrderSelect';
 import {
   FeedFilterEditor,
   parseFilterCriteria,
@@ -22,6 +24,7 @@ export function FeedEditPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [filters, setFilters] = useState<FeedFilter[]>([]);
+  const [sortOrder, setSortOrder] = useState<FeedSortOrder>('purchase_date_desc');
   const [isPublic, setIsPublic] = useState(true);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
@@ -33,6 +36,7 @@ export function FeedEditPage() {
       setName(feed.name);
       setDescription(feed.description || '');
       setIsPublic(feed.is_public);
+      setSortOrder(feed.sort_order ?? 'purchase_date_desc');
       setFilters(parseFilterCriteria(feed.filter_criteria));
     }
   }, [feed]);
@@ -67,6 +71,7 @@ export function FeedEditPage() {
     formData.append('name', name);
     formData.append('description', description);
     formData.append('is_public', String(isPublic));
+    formData.append('sort_order', sortOrder);
 
     if (feed.feed_type === 'smart') {
       formData.append('filters_json', serializeFilters(filters));
@@ -101,6 +106,12 @@ export function FeedEditPage() {
         {feed.feed_type === 'smart' && (
           <FeedFilterEditor filters={filters} onChange={setFilters} />
         )}
+
+        <FeedSortOrderSelect
+          feedType={feed.feed_type}
+          value={sortOrder}
+          onChange={setSortOrder}
+        />
 
         {/* Cover image */}
         <div className="space-y-2">

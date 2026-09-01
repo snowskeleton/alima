@@ -103,6 +103,25 @@ export interface DownloadsResponse {
   };
 }
 
+export type FeedSortOrder =
+  | 'purchase_date_desc'
+  | 'purchase_date_asc'
+  | 'title_asc'
+  | 'title_desc'
+  | 'author_asc'
+  | 'author_desc'
+  | 'manual';
+
+export const FEED_SORT_ORDER_OPTIONS: { value: FeedSortOrder; label: string }[] = [
+  { value: 'purchase_date_desc', label: 'Purchase date, newest first' },
+  { value: 'purchase_date_asc', label: 'Purchase date, oldest first' },
+  { value: 'title_asc', label: 'Title, A\u2013Z' },
+  { value: 'title_desc', label: 'Title, Z\u2013A' },
+  { value: 'author_asc', label: 'Author, A\u2013Z' },
+  { value: 'author_desc', label: 'Author, Z\u2013A' },
+  { value: 'manual', label: 'Manual (hand-ordered)' },
+];
+
 export interface Feed {
   id: number;
   user_id: number | null;
@@ -113,6 +132,7 @@ export interface Feed {
   is_public: boolean;
   is_system: boolean;
   is_pinned: boolean;
+  sort_order: FeedSortOrder;
   cover_image_path: string | null;
   slug: string;
   created_at: string;

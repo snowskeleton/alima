@@ -7,13 +7,42 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...dependencies import get_current_active_user, get_optional_user, require_admin
-from ...models import Book, Feed, FeedBook, FeedType, User
+from ...models import Book, Feed, FeedBook, FeedSortOrder, FeedType, User
 from ...schemas import DatabaseId
+from ...services.feed_generator import FeedGeneratorService
 from ...services.image_processor import ImageProcessorService
 from ...services.settings_service import SettingsService
 from ...utils.tokens import generate_invite_token
 
 router = APIRouter(prefix="/feeds", tags=["Feeds"])
+
+
+def _default_sort_order(feed_type: str | FeedType) -> str:
+    """The ordering a feed gets when the caller doesn't choose one.
+
+    Manual feeds default to their curated positions; everything else to the
+    newest-purchase-first order feeds have always used.
+    """
+    value = feed_type.value if isinstance(feed_type, FeedType) else feed_type
+    if value == FeedType.MANUAL.value:
+        return FeedSortOrder.MANUAL.value
+    return FeedSortOrder.PURCHASE_DATE_DESC.value
+
+
+def _parse_sort_order(value: str | None, feed_type: str | FeedType) -> str:
+    """Validate a sort_order form value, defaulting by feed type."""
+    if not value:
+        return _default_sort_order(feed_type)
+    try:
+        return FeedSortOrder(value).value
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid sort_order {value!r}. "
+                f"Expected one of: {', '.join(o.value for o in FeedSortOrder)}"
+            ),
+        )
 
 
 def _feed_to_dict(feed: Feed, domain: str = "") -> dict:
@@ -27,6 +56,7 @@ def _feed_to_dict(feed: Feed, domain: str = "") -> dict:
         "is_public": feed.is_public,
         "is_system": feed.is_system,
         "is_pinned": feed.is_pinned,
+        "sort_order": FeedGeneratorService.effective_sort_order(feed),
         "cover_image_path": feed.cover_image_path,
         "slug": feed.slug,
         "created_at": feed.created_at.isoformat() if feed.created_at else None,
@@ -58,6 +88,7 @@ async def create_feed(
     feed_type: str = Form(...),
     filters_json: str = Form(None),
     is_public: bool = Form(True),
+    sort_order: str = Form(None),
     cover_image: UploadFile = File(None),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -100,6 +131,8 @@ async def create_feed(
             ),
         )
 
+    parsed_sort_order = _parse_sort_order(sort_order, parsed_feed_type)
+
     feed = Feed(
         user_id=current_user.id,
         name=name,
@@ -107,6 +140,7 @@ async def create_feed(
         feed_type=parsed_feed_type,
         filter_criteria=filter_criteria,
         is_public=is_public,
+        sort_order=parsed_sort_order,
         cover_image_path=cover_image_path,
         slug=slug,
     )
@@ -131,8 +165,6 @@ async def get_feed_by_slug(
 
     if not feed.is_public:
         raise HTTPException(status_code=403, detail="This feed is private")
-
-    from ...services.feed_generator import FeedGeneratorService
 
     feed_generator = FeedGeneratorService(db)
     books = feed_generator._get_feed_books(feed)
@@ -173,7 +205,10 @@ async def get_feed(
     data = _feed_to_dict(feed, domain)
 
     if feed.feed_type == FeedType.MANUAL:
-        books = [fb.book for fb in sorted(feed.feed_books, key=lambda fb: fb.position)]
+        books = FeedGeneratorService.sort_books(
+            [fb.book for fb in sorted(feed.feed_books, key=lambda fb: fb.position)],
+            FeedGeneratorService.effective_sort_order(feed),
+        )
         from .books import _book_to_dict
         data["books"] = [_book_to_dict(b) for b in books]
 
@@ -187,6 +222,7 @@ async def update_feed(
     description: str = Form(None),
     is_public: bool = Form(True),
     filters_json: str = Form(None),
+    sort_order: str = Form(None),
     cover_image: UploadFile = File(None),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -212,6 +248,10 @@ async def update_feed(
     feed.name = name
     feed.description = description
     feed.is_public = is_public
+    # Omitting sort_order leaves the feed's current ordering alone rather than
+    # silently resetting it to the default.
+    if sort_order is not None:
+        feed.sort_order = _parse_sort_order(sort_order, feed.feed_type)
 
     if feed.feed_type == FeedType.SMART:
         if filters_json:
