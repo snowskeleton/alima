@@ -22,11 +22,25 @@ describe('Navbar', () => {
     await waitFor(() => expect(calls).toHaveLength(1));
   });
 
-  it('shows every admin link to an admin', async () => {
+  it('shows every admin link to an admin, pointed at a real route', async () => {
     render(adminUser);
 
-    for (const label of ['Accounts', 'Downloads', 'Users', 'Settings', 'Import', 'Match', 'Audit', 'Logs']) {
-      expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
+    // The href matters as much as the label: a link with the right text and a
+    // stale path is how the API Keys page went unreachable in the first place.
+    const links: [string, string][] = [
+      ['Accounts', '/admin/accounts'],
+      ['Downloads', '/admin/downloads'],
+      ['Users', '/admin/users'],
+      ['Settings', '/admin/settings'],
+      ['Import', '/admin/import'],
+      ['Match', '/admin/match-books'],
+      ['API Keys', '/admin/api-keys'],
+      ['Audit', '/admin/audit'],
+      ['Logs', '/logs'],
+    ];
+
+    for (const [label, href] of links) {
+      expect(screen.getByRole('link', { name: label })).toHaveAttribute('href', href);
     }
   });
 

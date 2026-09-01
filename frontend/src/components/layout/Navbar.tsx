@@ -18,6 +18,7 @@ export function Navbar() {
     { to: '/admin/settings', label: 'Settings' },
     { to: '/admin/import', label: 'Import' },
     { to: '/admin/match-books', label: 'Match' },
+    { to: '/admin/api-keys', label: 'API Keys' },
     { to: '/admin/audit', label: 'Audit' },
     { to: '/logs', label: 'Logs' },
   ];
