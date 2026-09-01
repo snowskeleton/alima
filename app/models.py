@@ -257,6 +257,18 @@ class Book(Base):
     )
 
 
+class FeedSortOrder(str, PyEnum):
+    """How a feed's episodes are ordered."""
+
+    PURCHASE_DATE_DESC = "purchase_date_desc"
+    PURCHASE_DATE_ASC = "purchase_date_asc"
+    TITLE_ASC = "title_asc"
+    TITLE_DESC = "title_desc"
+    AUTHOR_ASC = "author_asc"
+    AUTHOR_DESC = "author_desc"
+    MANUAL = "manual"
+
+
 class Feed(Base):
     """RSS Feed model."""
 
@@ -275,6 +287,11 @@ class Feed(Base):
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Stored as a plain string rather than a DB enum so adding a sort option
+    # later is a code change, not a migration on every backend. NULL means "the
+    # default for this feed type" -- curated position for manual feeds, newest
+    # purchase first for smart ones.
+    sort_order: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     cover_image_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     slug: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

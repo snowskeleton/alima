@@ -4,6 +4,8 @@ import { apiFetch } from '../api/client';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
+import { type FeedSortOrder } from '../api/types';
+import { FeedSortOrderSelect } from '../components/feeds/FeedSortOrderSelect';
 import {
   FeedFilterEditor,
   serializeFilters,
@@ -16,6 +18,7 @@ export function FeedCreatePage() {
   const [description, setDescription] = useState('');
   const [feedType, setFeedType] = useState('smart');
   const [filters, setFilters] = useState<FeedFilter[]>([]);
+  const [sortOrder, setSortOrder] = useState<FeedSortOrder>('purchase_date_desc');
   const [isPublic, setIsPublic] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -28,6 +31,7 @@ export function FeedCreatePage() {
     formData.append('description', description);
     formData.append('feed_type', feedType);
     formData.append('is_public', String(isPublic));
+    formData.append('sort_order', sortOrder);
 
     if (feedType === 'smart') {
       formData.append('filters_json', serializeFilters(filters));
@@ -65,6 +69,8 @@ export function FeedCreatePage() {
         {feedType === 'smart' && (
           <FeedFilterEditor filters={filters} onChange={setFilters} />
         )}
+
+        <FeedSortOrderSelect feedType={feedType} value={sortOrder} onChange={setSortOrder} />
 
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />

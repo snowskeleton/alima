@@ -76,6 +76,25 @@ Each feed has:
 - **Name** - Display name in podcast apps
 - **Description** - Feed description
 - **Books** - Which audiobooks to include
+- **Episode Order** - How episodes are ordered (see below)
+
+### Episode Order
+
+By default a feed is ordered by purchase date, newest first (books with no
+purchase date fall back to the date they were added). You can instead order a
+feed by:
+
+- Purchase date, oldest first
+- Title, A-Z or Z-A
+- Author, A-Z or Z-A
+- Manual (manual feeds only) - the order you arranged the books in
+
+!!! note "Why the dates change"
+    Podcast apps sort episodes by publication date rather than by the order they
+    appear in the feed. When you pick an order other than purchase date, Alima
+    publishes a descending run of synthetic dates so your chosen order is what
+    subscribers actually see. Change the order and your app will re-sort the
+    episodes on its next refresh.
 
 ### Deleting Feeds
 

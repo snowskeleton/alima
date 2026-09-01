@@ -1054,6 +1054,52 @@ def run_migration_020_add_api_key_usage_and_expiry(db: Session, engine) -> None:
         raise
 
 
+def run_migration_021_add_feed_sort_order(db: Session, engine) -> None:
+    """Add sort_order column to feeds table.
+
+    The column is nullable and existing rows stay NULL, which means "the default
+    order for this feed type" -- exactly how every feed already behaved -- so the
+    migration is a no-op from a subscriber's point of view.
+    """
+    migration_name = "021_add_feed_sort_order"
+
+    is_postgres = "postgresql" in str(engine.url)
+
+    if is_postgres:
+        result = db.execute(text("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name='feeds' AND column_name='sort_order'
+        """))
+        column_exists = result.fetchone() is not None
+    else:
+        result = db.execute(text("PRAGMA table_info(feeds)"))
+        column_exists = "sort_order" in [col[1] for col in result.fetchall()]
+
+    if column_exists:
+        logger.debug("Column sort_order already exists, ensuring migration is marked as applied")
+        if not has_migration_been_applied(db, migration_name):
+            mark_migration_applied(db, migration_name)
+        return
+
+    if has_migration_been_applied(db, migration_name):
+        logger.warning(f"Migration {migration_name} was marked as applied but column doesn't exist - re-running")
+        db.execute(text("DELETE FROM schema_migrations WHERE migration_name = :name"), {"name": migration_name})
+        db.commit()
+
+    logger.debug(f"Running migration: {migration_name}")
+
+    try:
+        db.execute(text("ALTER TABLE feeds ADD COLUMN sort_order VARCHAR(32) NULL"))
+        db.commit()
+        mark_migration_applied(db, migration_name)
+        logger.info(f"Migration {migration_name} completed successfully!")
+
+    except Exception as e:
+        logger.error(f"Migration {migration_name} failed: {e}", exc_info=True)
+        db.rollback()
+        raise
+
+
 def run_all_pending_migrations(db: Session) -> None:
     """Run all pending migrations in order."""
     from .database import engine
@@ -1078,6 +1124,7 @@ def run_all_pending_migrations(db: Session) -> None:
         run_migration_018_strip_html_descriptions,
         run_migration_019_add_download_progress,
         run_migration_020_add_api_key_usage_and_expiry,
+        run_migration_021_add_feed_sort_order,
     ]
 
     for migration_func in migrations:

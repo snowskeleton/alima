@@ -85,7 +85,9 @@ function SubscribeSection({ rssUrl }: { rssUrl: string }) {
   );
 }
 
-type SortKey = 'added_at' | 'title' | 'author' | 'series' | 'duration_seconds';
+// 'feed' keeps the order the API returned, which is the feed's configured
+// episode order -- the same order subscribers see in their podcast app.
+type SortKey = 'feed' | 'added_at' | 'title' | 'author' | 'series' | 'duration_seconds';
 
 export function FeedDetailPage() {
   const { slug } = useParams();
@@ -93,7 +95,7 @@ export function FeedDetailPage() {
   const { user } = useAuth();
 
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<SortKey>('added_at');
+  const [sort, setSort] = useState<SortKey>('feed');
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
 
   const books = feed?.books ?? [];
@@ -109,6 +111,10 @@ export function FeedDetailPage() {
         b.series?.toLowerCase().includes(q) ||
         b.narrator?.toLowerCase().includes(q)
       );
+    }
+
+    if (sort === 'feed') {
+      return result;
     }
 
     result.sort((a, b) => {
@@ -186,6 +192,7 @@ export function FeedDetailPage() {
           onChange={e => setSort(e.target.value as SortKey)}
           className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
         >
+          <option value="feed">Feed Order</option>
           <option value="added_at">Date Added</option>
           <option value="title">Title</option>
           <option value="author">Author</option>

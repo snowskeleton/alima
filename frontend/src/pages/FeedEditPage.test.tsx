@@ -136,4 +136,31 @@ describe('FeedEditPage', () => {
 
     expect(await screen.findByText(/feed not found/i)).toBeInTheDocument();
   });
+
+  it('prefills the episode order and sends the edited one', async () => {
+    showFeed({ id: 3, feed_type: 'smart', sort_order: 'title_asc' });
+    const calls = recordRequests('put', '/api/v2/feeds/3');
+
+    render();
+    const order = await screen.findByLabelText(/episode order/i);
+    expect(order).toHaveValue('title_asc');
+
+    await userEvent.selectOptions(order, 'author_desc');
+    await userEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body.sort_order).toBe('author_desc');
+  });
+
+  it('offers the manual order only for manual feeds', async () => {
+    // A smart feed has no curated positions to fall back on.
+    showFeed({ id: 3, feed_type: 'smart' });
+    render();
+
+    const order = await screen.findByLabelText(/episode order/i);
+    const values = Array.from(order.querySelectorAll('option')).map(o => o.value);
+    expect(values).toContain('title_asc');
+    expect(values).not.toContain('manual');
+  });
+
 });

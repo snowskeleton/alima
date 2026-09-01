@@ -482,3 +482,186 @@ class TestFeedCover:
             bob_client.delete(f"/api/v2/feeds/{alice_private.id}/cover").status_code
             == 403
         )
+
+
+class TestFeedSortOrder:
+    """Per-feed episode ordering.
+
+    The historical behaviour -- newest purchase first for smart feeds, curated
+    position for manual ones -- is what a NULL sort_order still means, so these
+    tests pin both the defaults and the opt-in orders.
+    """
+
+    @pytest.fixture
+    def alphabet_feed(self, make_feed, make_book, test_db: Session, alice):
+        """A manual feed whose books sort differently by title than by date."""
+        from datetime import datetime
+
+        feed = make_feed(alice, feed_type=FeedType.MANUAL, slug="alphabet")
+        books = [
+            make_book(
+                title="Zebra", author="Young, A",
+                file_path="z.m4b", purchased_at=datetime(2024, 3, 1),
+            ),
+            make_book(
+                title="Apple", author="Adams, B",
+                file_path="a.m4b", purchased_at=datetime(2024, 1, 1),
+            ),
+            make_book(
+                title="Mango", author="Miller, C",
+                file_path="m.m4b", purchased_at=datetime(2024, 2, 1),
+            ),
+        ]
+        # Positions follow the insertion order above, which is neither
+        # alphabetical nor chronological.
+        for position, book in enumerate(books):
+            test_db.add(FeedBook(feed_id=feed.id, book_id=book.id, position=position))
+        test_db.commit()
+        return feed
+
+    def _feed_titles(self, feed, db=None):
+        from app.services.feed_generator import FeedGeneratorService
+
+        return [b.title for b in FeedGeneratorService(db)._get_feed_books(feed)]
+
+    def test_manual_feed_defaults_to_its_curated_order(self, alphabet_feed):
+        assert alphabet_feed.sort_order is None
+        assert self._feed_titles(alphabet_feed) == ["Zebra", "Apple", "Mango"]
+
+    def test_title_ascending_overrides_the_curated_order(
+        self, test_db: Session, alphabet_feed
+    ):
+        alphabet_feed.sort_order = "title_asc"
+        test_db.commit()
+        assert self._feed_titles(alphabet_feed) == ["Apple", "Mango", "Zebra"]
+
+    def test_title_descending_reverses_it(self, test_db: Session, alphabet_feed):
+        alphabet_feed.sort_order = "title_desc"
+        test_db.commit()
+        assert self._feed_titles(alphabet_feed) == ["Zebra", "Mango", "Apple"]
+
+    def test_author_orders_run_both_ways(self, test_db: Session, alphabet_feed):
+        alphabet_feed.sort_order = "author_asc"
+        test_db.commit()
+        assert self._feed_titles(alphabet_feed) == ["Apple", "Mango", "Zebra"]
+
+        alphabet_feed.sort_order = "author_desc"
+        test_db.commit()
+        assert self._feed_titles(alphabet_feed) == ["Zebra", "Mango", "Apple"]
+
+    def test_purchase_date_orders_run_both_ways(
+        self, test_db: Session, alphabet_feed
+    ):
+        alphabet_feed.sort_order = "purchase_date_asc"
+        test_db.commit()
+        assert self._feed_titles(alphabet_feed) == ["Apple", "Mango", "Zebra"]
+
+        alphabet_feed.sort_order = "purchase_date_desc"
+        test_db.commit()
+        assert self._feed_titles(alphabet_feed) == ["Zebra", "Mango", "Apple"]
+
+    def test_alphabetical_feed_publishes_descending_pub_dates(
+        self, test_db: Session, alphabet_feed
+    ):
+        """Podcast apps sort by pubDate, so the dates must agree with the order.
+
+        Without synthetic dates an A-Z feed would still show up newest-purchase
+        first in every client, which is the whole point of the setting.
+        """
+        import re
+
+        from app.services.feed_generator import FeedGeneratorService
+
+        alphabet_feed.sort_order = "title_asc"
+        alphabet_feed.is_public = True
+        test_db.commit()
+
+        xml = FeedGeneratorService(test_db).generate_rss(alphabet_feed).decode()
+        item_dates = re.findall(r"<pubDate>(.*?)</pubDate>", xml)[1:]  # [0] is the channel
+
+        from email.utils import parsedate_to_datetime
+
+        parsed = [parsedate_to_datetime(d) for d in item_dates]
+        assert len(parsed) == 3
+        assert parsed == sorted(parsed, reverse=True), (
+            "the first item in an A-Z feed must carry the newest date"
+        )
+
+    def test_books_with_no_dates_sort_last_and_still_get_a_pub_date(self):
+        """Defensive: added_at is NOT NULL in the schema, so these Books are
+        built in memory. A missing date must sort last rather than raise, and
+        must still produce some pubDate, since an item without one is invalid
+        RSS."""
+        from datetime import datetime
+
+        from app.models import Book
+        from app.services.feed_generator import FeedGeneratorService
+
+        dated = Book(title="Dated", purchased_at=datetime(2024, 1, 1))
+        undated = Book(title="Undated")
+
+        for order in ("purchase_date_desc", "purchase_date_asc"):
+            ordered = FeedGeneratorService.sort_books([undated, dated], order)
+            assert [b.title for b in ordered] == ["Dated", "Undated"], order
+
+            pub_dates = FeedGeneratorService._item_pub_dates(ordered, order)
+            assert all(d is not None for d in pub_dates), order
+
+    def test_smart_feed_defaults_to_newest_purchase_first(
+        self, test_db: Session, make_feed, make_book, alice
+    ):
+        from datetime import datetime
+
+        feed = make_feed(alice, feed_type=FeedType.SMART, slug="smart-default")
+        make_book(title="Older", file_path="o.m4b", purchased_at=datetime(2024, 1, 1))
+        make_book(title="Newer", file_path="n.m4b", purchased_at=datetime(2024, 5, 1))
+
+        assert self._feed_titles(feed, test_db)[:2] == ["Newer", "Older"]
+
+    def test_create_accepts_a_sort_order(self, authenticated_client: TestClient):
+        response = authenticated_client.post(
+            "/api/v2/feeds",
+            data={"name": "A-Z", "feed_type": "smart", "sort_order": "title_asc"},
+        )
+        assert response.status_code == 200
+        assert response.json()["sort_order"] == "title_asc"
+
+    def test_create_rejects_an_unknown_sort_order(self, authenticated_client: TestClient):
+        response = authenticated_client.post(
+            "/api/v2/feeds",
+            data={"name": "Nope", "feed_type": "smart", "sort_order": "by_vibes"},
+        )
+        assert response.status_code == 400
+
+    def test_update_changes_the_sort_order(
+        self, authenticated_client: TestClient, alice_public
+    ):
+        response = authenticated_client.put(
+            f"/api/v2/feeds/{alice_public.id}",
+            data={"name": alice_public.name, "sort_order": "author_desc"},
+        )
+        assert response.status_code == 200
+        assert response.json()["sort_order"] == "author_desc"
+
+    def test_update_without_a_sort_order_leaves_it_alone(
+        self, authenticated_client: TestClient, test_db: Session, alice_public
+    ):
+        alice_public.sort_order = "title_asc"
+        test_db.commit()
+
+        response = authenticated_client.put(
+            f"/api/v2/feeds/{alice_public.id}", data={"name": alice_public.name}
+        )
+        assert response.json()["sort_order"] == "title_asc", (
+            "a form that omits sort_order must not silently reset the ordering"
+        )
+
+    def test_listing_reports_the_effective_order(
+        self, authenticated_client: TestClient, make_feed, alice
+    ):
+        make_feed(alice, feed_type=FeedType.MANUAL, slug="curated", is_public=True)
+        feeds = authenticated_client.get("/api/v2/feeds").json()["feeds"]
+        entry = next(f for f in feeds if f["slug"] == "curated")
+        assert entry["sort_order"] == "manual", (
+            "a NULL column must surface as the type's default, not as null"
+        )
