@@ -1,6 +1,7 @@
 """Service for generating RSS feeds."""
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import List
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -13,6 +14,13 @@ from ..models import Book, Feed, FeedSortOrder, FeedType
 from ..utils.media_types import audio_media_type
 
 logger = logging.getLogger(__name__)
+
+_UNABRIDGED_SUFFIX = re.compile(r"\s*\(Unabridged\)\s*$", re.IGNORECASE)
+
+
+def _strip_unabridged(text: str) -> str:
+    """Drop a trailing "(Unabridged)" marker, keeping "(Abridged)"."""
+    return _UNABRIDGED_SUFFIX.sub("", text).strip()
 
 
 class FeedGeneratorService:
@@ -269,6 +277,34 @@ class FeedGeneratorService:
         # Priority 3: No cover
         return None
 
+    @staticmethod
+    def _item_title(book: Book) -> str:
+        """Episode title: title, then subtitle, then series if not already named."""
+        title = _strip_unabridged(book.title or "")
+        subtitle = _strip_unabridged(book.subtitle or "")
+        series_name = _strip_unabridged(book.series or "")
+
+        full_title = title
+        if subtitle and subtitle.lower() not in title.lower():
+            full_title = f"{title}: {subtitle}"
+
+        if series_name:
+            # Some files have series set to the title, and Audible subtitles
+            # often already name the series ("Book Two of The Wheel of Time"),
+            # so only add it when it says something new.
+            series_normalized = series_name.lower().rstrip("!.?")
+            if (
+                series_normalized != title.lower().rstrip("!.?")
+                and series_normalized not in subtitle.lower()
+            ):
+                series_text = series_name
+                if book.series_position:
+                    series_text += f", Book {book.series_position}"
+                if series_text not in full_title:
+                    full_title = f"{full_title}: {series_text}"
+
+        return full_title
+
     def _add_item(
         self, channel: Element, book: Book, feed: Feed, domain: str, pub_date: datetime
     ) -> None:
@@ -284,40 +320,7 @@ class FeedGeneratorService:
         """
         item = SubElement(channel, "item")
 
-        # Format title with series info
-        title = book.title
-
-        # Remove " (Unabridged)" but keep " (Abridged)" if present
-        # Note: Audible includes a space before the parenthesis
-        if title.endswith(" (Unabridged)"):
-            title = title[:-14].strip()
-        elif title.endswith("(Unabridged)"):
-            # Fallback for titles without the space
-            title = title[:-13].strip()
-
-        # Clean series name
-        series_name = book.series
-        if series_name:
-            # Also remove (Unabridged) from series
-            if series_name.endswith(" (Unabridged)"):
-                series_name = series_name[:-14].strip()
-            elif series_name.endswith("(Unabridged)"):
-                series_name = series_name[:-13].strip()
-
-            # Check if series is actually different from title (ignore case and minor differences)
-            # Some files incorrectly have series set to title
-            title_normalized = title.lower().strip().rstrip('!.?')
-            series_normalized = series_name.lower().strip().rstrip('!.?')
-
-            # Only add series info if it's meaningfully different from the title
-            if series_normalized and series_normalized != title_normalized:
-                series_text = series_name
-                if book.series_position:
-                    series_text += f", Book {book.series_position}"
-
-                # Only add if not already in the title
-                if series_text not in title:
-                    title = f"{title}: {series_text}"
+        title = self._item_title(book)
 
         SubElement(item, "title").text = title
         SubElement(item, "link").text = f"{domain}/library/{book.id}"
