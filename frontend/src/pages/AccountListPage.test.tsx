@@ -183,4 +183,66 @@ describe('AccountListPage', () => {
 
     expect(await screen.findByText(/no accounts/i)).toBeInTheDocument();
   });
+
+  it('flags accounts that need re-auth and links Re-authenticate to the login page', async () => {
+    showAccounts(makeAccount({ id: 2, needs_reauth: true }), makeAccount({ id: 3, username: 'ok@example.com' }));
+
+    renderWithProviders(<AccountListPage />);
+
+    expect(await screen.findByText(/1 account was registered with an outdated/i)).toBeInTheDocument();
+    expect(screen.getAllByText('Needs re-auth')).toHaveLength(1);
+    const links = screen.getAllByRole('link', { name: /re-authenticate/i });
+    expect(links.map(l => l.getAttribute('href'))).toEqual([
+      '/admin/accounts/login?reauth=2',
+      '/admin/accounts/login?reauth=3',
+    ]);
+  });
+
+  it('shows Remove old device only for accounts that have one', async () => {
+    showAccounts(makeAccount({ id: 2 }));
+
+    renderWithProviders(<AccountListPage />);
+    await screen.findByRole('button', { name: 'Sync' });
+
+    expect(screen.queryByRole('button', { name: /remove old device/i })).not.toBeInTheDocument();
+  });
+
+  it('Remove old device confirms, then posts and reports success', async () => {
+    showAccounts(makeAccount({ id: 2, previous_devices: 1 }));
+    const confirm = stubConfirm(true);
+    const calls = recordRequests('post', '/api/v2/accounts/2/deregister-previous-devices', {
+      removed: 1, failed: [], previous_devices: 0,
+    });
+
+    renderWithProviders(<AccountListPage />);
+    await userEvent.click(await screen.findByRole('button', { name: /remove old device/i }));
+
+    expect(confirm).toHaveBeenCalled();
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(await screen.findByText(/removed the old device for reader@example.com/i)).toBeInTheDocument();
+  });
+
+  it('Remove old device does nothing when the confirm is cancelled', async () => {
+    showAccounts(makeAccount({ id: 2, previous_devices: 1 }));
+    stubConfirm(false);
+    const calls = recordRequests('post', '/api/v2/accounts/2/deregister-previous-devices');
+
+    renderWithProviders(<AccountListPage />);
+    await userEvent.click(await screen.findByRole('button', { name: /remove old device/i }));
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it('Remove old device explains a failure from Amazon', async () => {
+    showAccounts(makeAccount({ id: 2, previous_devices: 1 }));
+    stubConfirm(true);
+    recordRequests('post', '/api/v2/accounts/2/deregister-previous-devices', {
+      removed: 0, failed: [{ device: 'ABC123', error: 'token expired' }], previous_devices: 1,
+    });
+
+    renderWithProviders(<AccountListPage />);
+    await userEvent.click(await screen.findByRole('button', { name: /remove old device/i }));
+
+    expect(await screen.findByText(/…ABC123: token expired/)).toBeInTheDocument();
+  });
 });

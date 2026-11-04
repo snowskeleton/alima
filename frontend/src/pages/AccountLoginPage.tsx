@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../api/client';
+import { useAccounts } from '../api/hooks/useAccounts';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
@@ -10,8 +11,46 @@ import { Alert } from '../components/ui/Alert';
 // account's owner to sign in and send the redirect URL back.
 const PENDING_KEY = 'alima.pendingAudibleLogin';
 
+interface CompleteResponse {
+  success: boolean;
+  username: string;
+  reauthenticated?: boolean;
+  previous_devices?: number;
+}
+
+/** The message the accounts list shows after a successful login. */
+export interface AccountsNotice {
+  type: 'success' | 'warning';
+  message: string;
+}
+
+function noticeFor(result: CompleteResponse): AccountsNotice {
+  if (!result.reauthenticated) {
+    return { type: 'success', message: `Added ${result.username}.` };
+  }
+  return {
+    type: 'success',
+    message: result.previous_devices
+      ? `Re-authenticated ${result.username}. Its old device is still registered with Amazon; ` +
+        'use "Remove old device" once downloads work with the new one.'
+      : `Re-authenticated ${result.username}.`,
+  };
+}
+
 export function AccountLoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // ?reauth=<account id> re-registers an existing account's device in place
+  // instead of adding a new account.
+  const reauthParam = searchParams.get('reauth');
+  const reauthId = reauthParam && /^\d+$/.test(reauthParam) ? Number(reauthParam) : null;
+  const { data: accountsData } = useAccounts();
+  const reauthAccount = reauthId === null
+    ? undefined
+    : accountsData?.accounts.find(a => a.id === reauthId);
+  // Each re-auth keeps its own pending login, so starting one doesn't clobber
+  // a half-finished add (or a re-auth of a different account).
+  const pendingKey = reauthId === null ? PENDING_KEY : `${PENDING_KEY}.reauth.${reauthId}`;
   const [marketplace, setMarketplace] = useState('us');
   const [withUsername, setWithUsername] = useState(false);
   const [step, setStep] = useState<'start' | 'waiting' | 'complete'>('start');
@@ -35,7 +74,7 @@ export function AccountLoginPage() {
   ];
 
   useEffect(() => {
-    const saved = localStorage.getItem(PENDING_KEY);
+    const saved = localStorage.getItem(pendingKey);
     if (!saved) return;
     try {
       const pending = JSON.parse(saved);
@@ -45,12 +84,12 @@ export function AccountLoginPage() {
       setMarketplace(pending.marketplace ?? 'us');
       setStep('waiting');
     } catch {
-      localStorage.removeItem(PENDING_KEY);
+      localStorage.removeItem(pendingKey);
     }
-  }, []);
+  }, [pendingKey]);
 
   const discardPending = () => {
-    localStorage.removeItem(PENDING_KEY);
+    localStorage.removeItem(pendingKey);
     setSessionId('');
     setOauthUrl('');
     setRedirectUrl('');
@@ -64,12 +103,19 @@ export function AccountLoginPage() {
     try {
       const data = await apiFetch<{ session_id: string; oauth_url: string }>(
         '/accounts/login/generate-url',
-        { method: 'POST', body: JSON.stringify({ marketplace, with_username: withUsername }) },
+        {
+          method: 'POST',
+          body: JSON.stringify(
+            reauthId === null
+              ? { marketplace, with_username: withUsername }
+              : { account_id: reauthId, with_username: withUsername },
+          ),
+        },
       );
       setSessionId(data.session_id);
       setOauthUrl(data.oauth_url);
       localStorage.setItem(
-        PENDING_KEY,
+        pendingKey,
         JSON.stringify({ sessionId: data.session_id, oauthUrl: data.oauth_url, marketplace }),
       );
       setStep('waiting');
@@ -84,12 +130,12 @@ export function AccountLoginPage() {
     setLoading(true);
     setError('');
     try {
-      await apiFetch('/accounts/login/complete', {
+      const result = await apiFetch<CompleteResponse>('/accounts/login/complete', {
         method: 'POST',
         body: JSON.stringify({ session_id: sessionId, redirect_url: redirectUrl }),
       });
-      localStorage.removeItem(PENDING_KEY);
-      navigate('/admin/accounts');
+      localStorage.removeItem(pendingKey);
+      navigate('/admin/accounts', { state: { notice: noticeFor(result) } });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Login failed');
     } finally {
@@ -103,13 +149,31 @@ export function AccountLoginPage() {
         <Link to="/admin/accounts" className="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to Accounts</Link>
       </div>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Add Audible Account</h1>
+      <h1 className="text-2xl font-bold text-gray-900 mb-6">
+        {reauthId === null
+          ? 'Add Audible Account'
+          : `Re-authenticate ${reauthAccount?.username ?? 'Audible Account'}`}
+      </h1>
+
+      {reauthId !== null && (
+        <Alert type="info" className="mb-4">
+          This registers a new device for the account and switches it over. Sign in with the
+          same Amazon account it was added with. Its books and download history stay as they
+          are, and the old device stays registered until you remove it from the accounts list.
+        </Alert>
+      )}
 
       {error && <Alert type="error" className="mb-4">{error}</Alert>}
 
       {step === 'start' && (
         <div className="bg-white p-6 rounded-lg border border-gray-200 space-y-4">
-          <Select label="Marketplace" value={marketplace} onChange={(e) => setMarketplace(e.target.value)} options={marketplaces} />
+          {reauthId === null ? (
+            <Select label="Marketplace" value={marketplace} onChange={(e) => setMarketplace(e.target.value)} options={marketplaces} />
+          ) : (
+            <p className="text-sm text-gray-700">
+              Marketplace: <span className="font-medium">{reauthAccount?.marketplace.toUpperCase() ?? '…'}</span>
+            </p>
+          )}
           <label className="flex items-start gap-2 text-sm">
             <input type="checkbox" className="mt-0.5" checked={withUsername} onChange={e => setWithUsername(e.target.checked)} />
             <span>
