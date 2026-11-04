@@ -1,7 +1,7 @@
 import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { recordRequests } from '../test/record';
 import { server } from '../test/server';
 import { renderWithProviders } from '../test/utils';
@@ -30,7 +30,19 @@ function render() {
   return renderWithProviders(<SignInLinkPage />, { route: '/signin/tok123', path: '/signin/:token' });
 }
 
-afterEach(() => vi.useRealTimers());
+let writeText: ReturnType<typeof vi.fn>;
+
+beforeEach(() => {
+  writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', {
+    value: { writeText }, configurable: true,
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe('SignInLinkPage', () => {
   it('offers to get a code without contacting Amazon on load', async () => {
@@ -56,6 +68,76 @@ describe('SignInLinkPage', () => {
       'href', 'https://www.amazon.com/code',
     );
     expect(screen.getByText(/valid for 9:5\d/i)).toBeInTheDocument();
+    // Copied as part of the Get my code tap, without a separate press.
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('AB12C'));
+    expect(await screen.findByRole('button', { name: /copied/i })).toBeInTheDocument();
+  });
+
+  it('shows the code before the Amazon link', async () => {
+    showLink(WAITING);
+    render();
+    const code = await screen.findByLabelText('Your code');
+    const link = screen.getByRole('link', { name: /open amazon.com\/code/i });
+    expect(code.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('Copy code copies, and so does opening Amazon', async () => {
+    showLink(WAITING);
+    render();
+    await screen.findByLabelText('Your code');
+    writeText.mockClear();
+
+    await userEvent.click(screen.getByRole('button', { name: /copy code|copied/i }));
+    expect(writeText).toHaveBeenLastCalledWith('AB12C');
+
+    writeText.mockClear();
+    const link = screen.getByRole('link', { name: /open amazon.com\/code/i });
+    link.addEventListener('click', e => e.preventDefault()); // jsdom can't navigate
+    await userEvent.click(link);
+    expect(writeText).toHaveBeenLastCalledWith('AB12C');
+  });
+
+  it('a refused copy just leaves the button saying Copy code', async () => {
+    writeText.mockRejectedValue(new Error('not allowed'));
+    document.execCommand = vi.fn().mockReturnValue(false);
+    showLink(WAITING);
+    render();
+    expect(await screen.findByRole('button', { name: 'Copy code' })).toBeInTheDocument();
+  });
+
+  it('falls back to execCommand when the Clipboard API is refused or missing', async () => {
+    writeText.mockRejectedValue(new Error('not allowed'));
+    const exec = vi.fn().mockReturnValue(true);
+    document.execCommand = exec;
+    showLink(WAITING);
+    render();
+
+    await userEvent.click(await screen.findByRole('button', { name: /copy code|copied/i }));
+
+    expect(exec).toHaveBeenCalledWith('copy');
+    expect(await screen.findByRole('button', { name: /copied/i })).toBeInTheDocument();
+
+    // Plain HTTP: no navigator.clipboard at all.
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    exec.mockClear();
+    await userEvent.click(screen.getByRole('button', { name: /copied/i }));
+    expect(exec).toHaveBeenCalledWith('copy');
+  });
+
+  it('starts the copy inside the Get my code tap where ClipboardItem exists', async () => {
+    const write = vi.fn().mockImplementation(async (items: { data: Record<string, Promise<Blob>> }[]) => {
+      await items[0].data['text/plain'];
+    });
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText, write }, configurable: true });
+    vi.stubGlobal('ClipboardItem', class { constructor(public data: Record<string, Promise<Blob>>) {} });
+    showLink(linkState());
+    recordRequests('post', `${BASE}/code`, WAITING);
+
+    render();
+    await userEvent.click(await screen.findByRole('button', { name: /get my code/i }));
+
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('button', { name: /copied/i })).toBeInTheDocument();
   });
 
   it('polls until done, then says so', async () => {
