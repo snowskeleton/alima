@@ -25,6 +25,7 @@ import { LogsPage } from './pages/LogsPage';
 import { AuditPage } from './pages/AuditPage';
 import { MatchBooksPage } from './pages/MatchBooksPage';
 import { ImportPage } from './pages/ImportPage';
+import { SignInLinkPage } from './pages/SignInLinkPage';
 
 export default function App() {
   return (
@@ -34,6 +35,10 @@ export default function App() {
       <Route path="/auth/register" element={<RegisterPage />} />
       <Route path="/auth/magic-link-sent" element={<MagicLinkSentPage />} />
       <Route path="/auth/magic-link" element={<MagicLinkCallbackPage />} />
+
+      {/* Audible sign-in links: opened by an account's owner, who has no Alima
+          login. The token in the URL is the credential. */}
+      <Route path="/signin/:token" element={<SignInLinkPage />} />
 
       {/* Public routes with shell — anonymous visitors must reach these.
           The server decides what's visible: /feeds/by-slug/{slug} 403s on a

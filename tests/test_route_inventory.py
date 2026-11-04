@@ -35,6 +35,13 @@ PUBLIC_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v2/auth/magic-link"),  # the magic-link token *is* the credential
     ("POST", "/api/v2/auth/logout"),  # clearing a cookie needs no proof of identity
     ("GET", "/api/v2/auth/status"),  # reports whether anyone is logged in
+    # --- Audible sign-in links ---
+    # Opened by an Audible account's owner, who has no Alima login. The token in
+    # the path *is* the credential: single-use, expiring, stored hashed, and it
+    # can only finish the one sign-in it was created for.
+    ("GET", "/api/v2/signin-links/{token}"),
+    ("POST", "/api/v2/signin-links/{token}/code"),
+    ("POST", "/api/v2/signin-links/{token}/poll"),
     # --- Public podcast surface ---
     # Podcast players cannot authenticate, so these are public by design and
     # enforce their own per-feed `is_public` check instead.
