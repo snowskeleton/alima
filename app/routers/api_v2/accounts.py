@@ -339,29 +339,73 @@ async def complete_login(
 
     from audible.register import register
 
-    register_data = register(
-        authorization_code=authorization_code,
-        code_verifier=session_data["code_verifier"].encode(),
-        domain=session_data["domain"],
-        serial=session_data["serial"],
-        with_username=session_data["with_username"],
-    )
+    try:
+        register_data = register(
+            authorization_code=authorization_code,
+            code_verifier=session_data["code_verifier"].encode(),
+            domain=session_data["domain"],
+            serial=session_data["serial"],
+            with_username=session_data["with_username"],
+        )
+    except Exception as exc:
+        # Most often a redirect URL that was already used, or one from an older
+        # login attempt. Was a 500 before.
+        import logging
+        logging.getLogger(__name__).warning("Device registration failed: %s", exc)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Amazon didn't accept that sign-in. The redirect URL may already have been "
+                "used or be from an older login. Start over and sign in again."
+            ),
+        )
 
     auth = Authenticator()
     auth.locale = Locale(session_data["marketplace"])
     auth._update_attrs(with_username=session_data["with_username"], **register_data)
 
-    reauth_account_id = session_data.get("reauth_account_id")
+    return finish_registration(
+        db,
+        auth,
+        marketplace=session_data["marketplace"],
+        reauth_account_id=session_data.get("reauth_account_id"),
+    )
+
+
+def finish_registration(
+    db: Session, auth: Authenticator, *, marketplace: str, reauth_account_id: int | None
+) -> dict:
+    """Put a freshly registered device to use: re-auth an account, or add one.
+
+    Shared by the paste-the-URL login and the device-code sign-in links. If the
+    device can't be used, it is deregistered again before the error is raised,
+    so refusals don't leave strays in the person's Amazon device list.
+    """
     if reauth_account_id is not None:
         return _complete_reauth(db, reauth_account_id, auth)
+    return _create_account(db, auth, marketplace)
 
-    activation_bytes = auth.get_activation_bytes()
-    user_info = auth.user_profile()
-    username = user_info.get("name") or user_info.get("email") or session_data["serial"]
+
+def _create_account(db: Session, auth: Authenticator, marketplace: str) -> dict:
+    try:
+        activation_bytes = auth.get_activation_bytes()
+        user_info = auth.user_profile()
+    except Exception as exc:
+        _deregister_quietly(auth)
+        raise HTTPException(status_code=502, detail=f"Couldn't read the new account from Audible: {exc}")
+    username = (
+        user_info.get("name")
+        or user_info.get("email")
+        or (auth.device_info or {}).get("device_serial_number")
+    )
 
     existing = db.query(AudibleAccount).filter(AudibleAccount.username == username).first()
     if existing:
-        raise HTTPException(status_code=400, detail=f"Account '{username}' already exists")
+        _deregister_quietly(auth)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Account '{username}' already exists. Use Re-authenticate on it instead.",
+        )
 
     settings.audible_auth_path.mkdir(parents=True, exist_ok=True)
     auth_filename = f"{username}.json"
@@ -372,7 +416,7 @@ async def complete_login(
         username=username,
         auth_file_path=auth_filename,
         activation_bytes=activation_bytes,
-        marketplace=session_data["marketplace"],
+        marketplace=marketplace,
         enabled=True,
     )
     db.add(account)

@@ -44,7 +44,8 @@ export function AccountLoginPage() {
   // instead of adding a new account.
   const reauthParam = searchParams.get('reauth');
   const reauthId = reauthParam && /^\d+$/.test(reauthParam) ? Number(reauthParam) : null;
-  const { data: accountsData } = useAccounts();
+  // Only needed to name the account being re-authenticated.
+  const { data: accountsData } = useAccounts({ enabled: reauthId !== null });
   const reauthAccount = reauthId === null
     ? undefined
     : accountsData?.accounts.find(a => a.id === reauthId);
@@ -59,6 +60,9 @@ export function AccountLoginPage() {
   const [redirectUrl, setRedirectUrl] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [signinLink, setSigninLink] = useState<{ url: string; expiresAt: string } | null>(null);
+  const [linkError, setLinkError] = useState('');
+  const [linkLoading, setLinkLoading] = useState(false);
 
   const marketplaces = [
     { value: 'us', label: 'United States' },
@@ -126,6 +130,22 @@ export function AccountLoginPage() {
     }
   };
 
+  const createSigninLink = async () => {
+    setLinkLoading(true);
+    setLinkError('');
+    try {
+      const data = await apiFetch<{ path: string; expires_at: string }>('/signin-links', {
+        method: 'POST',
+        body: JSON.stringify(reauthId === null ? { marketplace } : { account_id: reauthId }),
+      });
+      setSigninLink({ url: `${window.location.origin}${data.path}`, expiresAt: data.expires_at });
+    } catch (e) {
+      setLinkError(e instanceof Error ? e.message : 'Failed to create link');
+    } finally {
+      setLinkLoading(false);
+    }
+  };
+
   const completeLogin = async () => {
     setLoading(true);
     setError('');
@@ -166,9 +186,47 @@ export function AccountLoginPage() {
       {error && <Alert type="error" className="mb-4">{error}</Alert>}
 
       {step === 'start' && (
+        <div className="bg-white p-6 rounded-lg border border-gray-200 space-y-3 mb-4">
+          <h2 className="text-base font-semibold text-gray-900">Send a sign-in link</h2>
+          <p className="text-sm text-gray-600">
+            For signing in someone else: send them a link. They sign in on Amazon and type a short
+            code, and the account is {reauthId === null ? 'added' : 're-authenticated'} automatically.
+            Nothing to send back. The link works once and expires in 7 days.
+          </p>
+          {linkError && <Alert type="error">{linkError}</Alert>}
+          {withUsername ? (
+            <p className="text-xs text-gray-500">Not available for pre-Amazon accounts; use the login URL below.</p>
+          ) : signinLink ? (
+            <div className="space-y-2">
+              <div className="bg-gray-50 p-3 rounded text-xs font-mono break-all" data-testid="signin-link">
+                {signinLink.url}
+              </div>
+              <div className="flex items-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard.writeText(signinLink.url)}
+                  className="text-xs text-indigo-600 hover:text-indigo-800"
+                >
+                  Copy sign-in link
+                </button>
+                <span className="text-xs text-gray-400">
+                  Expires {new Date(signinLink.expiresAt + 'Z').toLocaleString()}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <Button variant="secondary" onClick={createSigninLink} disabled={linkLoading}>
+              {linkLoading ? 'Creating…' : 'Create sign-in link'}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {step === 'start' && (
         <div className="bg-white p-6 rounded-lg border border-gray-200 space-y-4">
+          <h2 className="text-base font-semibold text-gray-900">Or sign in here</h2>
           {reauthId === null ? (
-            <Select label="Marketplace" value={marketplace} onChange={(e) => setMarketplace(e.target.value)} options={marketplaces} />
+            <Select label="Marketplace" value={marketplace} onChange={(e) => { setMarketplace(e.target.value); setSigninLink(null); }} options={marketplaces} />
           ) : (
             <p className="text-sm text-gray-700">
               Marketplace: <span className="font-medium">{reauthAccount?.marketplace.toUpperCase() ?? '…'}</span>

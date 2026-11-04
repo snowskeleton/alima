@@ -2,10 +2,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../client';
 import type { AudibleAccount } from '../types';
 
-export function useAccounts() {
+export function useAccounts({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery<{ accounts: AudibleAccount[] }>({
     queryKey: ['accounts'],
     queryFn: () => apiFetch('/accounts'),
+    enabled,
   });
 }
 

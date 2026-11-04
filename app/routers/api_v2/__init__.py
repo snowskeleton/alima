@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from . import auth, books, jobs, feeds, accounts, downloads, users, admin, settings as settings_router, logs, audit, match_books, import_books
+from . import auth, books, jobs, feeds, accounts, downloads, users, admin, settings as settings_router, logs, audit, match_books, import_books, signin_links
 
 router = APIRouter(prefix="/api/v2", tags=["API v2"])
 
@@ -19,3 +19,4 @@ router.include_router(logs.router)
 router.include_router(audit.router)
 router.include_router(match_books.router)
 router.include_router(import_books.router)
+router.include_router(signin_links.router)

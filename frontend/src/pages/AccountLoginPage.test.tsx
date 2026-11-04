@@ -219,4 +219,33 @@ describe('AccountLoginPage', () => {
       expect(localStorage.getItem(`${PENDING_KEY}.reauth.7`)).toBeNull();
     });
   });
+
+  describe('sign-in links', () => {
+    it('creates a link for the chosen marketplace and shows the full URL', async () => {
+      const calls = recordRequests('post', '/api/v2/signin-links', {
+        path: '/signin/tok123', expires_at: '2026-11-11T12:00:00',
+      });
+
+      render();
+      await userEvent.selectOptions(screen.getByLabelText(/marketplace/i), 'de');
+      await userEvent.click(screen.getByRole('button', { name: /create sign-in link/i }));
+
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0].body).toEqual({ marketplace: 'de' });
+      expect(await screen.findByTestId('signin-link')).toHaveTextContent(`${window.location.origin}/signin/tok123`);
+    });
+
+    it('is not offered for pre-Amazon accounts', async () => {
+      render();
+      await userEvent.click(screen.getByRole('checkbox'));
+      expect(screen.queryByRole('button', { name: /create sign-in link/i })).not.toBeInTheDocument();
+    });
+
+    it('shows why a link could not be created', async () => {
+      recordRequests('post', '/api/v2/signin-links', { detail: 'Unknown marketplace' }, { status: 400 });
+      render();
+      await userEvent.click(screen.getByRole('button', { name: /create sign-in link/i }));
+      expect(await screen.findByText(/unknown marketplace/i)).toBeInTheDocument();
+    });
+  });
 });

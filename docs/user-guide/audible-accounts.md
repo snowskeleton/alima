@@ -4,16 +4,50 @@ Learn how to add and manage your Audible accounts in Alima.
 
 ## Adding an Audible Account
 
-1. Navigate to **Admin → Audible Accounts**
-2. Click **Add Audible Account**
-3. Click **Login with Audible**
-4. A browser window will open
-5. Log in to your Audible account
-6. Complete any 2FA challenges if required
-7. Close the browser window when complete
-8. Return to Alima
+Go to **Admin → Audible Accounts** and click **Login with Audible**. There are
+two ways to sign in.
 
-Alima will automatically start syncing your library.
+### Send a sign-in link (easiest, and works for other people)
+
+1. Pick the marketplace and click **Create sign-in link**.
+2. Copy the link and send it to the account's owner (or open it yourself).
+3. They click **Get my code**, open `amazon.<tld>/code`, sign in to Amazon and
+   type the 5-character code shown.
+4. The page notices by itself and the account appears in Alima. Nothing has to
+   be sent back.
+
+The link works once and expires after 7 days. Each code it shows lasts about 10
+minutes; if one runs out, the page offers a new one. The person signs in on
+Amazon's own site, so Alima never sees their password, and they don't need an
+Alima login. Alima has to be reachable from their network for the link to work.
+
+Sign-in links don't work for pre-Amazon (username) Audible accounts.
+
+### Sign in here (paste the redirect URL)
+
+1. Pick the marketplace and click **Generate Login URL**.
+2. Open the URL, sign in to Amazon, and complete any 2FA challenge.
+3. You land on a "page not found" page. Copy its full URL from the address bar.
+4. Paste it into Alima and click **Complete Login**.
+
+The pending login is kept for 7 days, so you can also send the URL to the
+account's owner and paste in the URL they send back.
+
+## Re-authenticating an Account
+
+Since October 2026, Audible refuses download licenses (`CustomerThrottled`) to
+devices registered with an older device profile. Accounts that need it show a
+**Needs re-auth** badge. Re-authenticating registers a new device for the same
+account; its books and history are kept.
+
+1. Click **Re-authenticate** on the account.
+2. Create a sign-in link, or sign in here, as above. Use the **same** Amazon
+   account the Audible account was added with; a different one is refused.
+3. Once downloads work with the new device, click **Remove old device** to
+   deregister the old one from Amazon. This is a separate step on purpose.
+
+There is no way to re-register without a fresh sign-in: Amazon only accepts
+recently signed-in credentials for a new device.
 
 ## Multiple Accounts
 

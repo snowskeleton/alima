@@ -47,6 +47,8 @@ EXCLUDED_PATHS = {
     "/api/v2/accounts/login/complete",
     "/api/v2/accounts/{account_id}/sync",
     "/api/v2/accounts/{account_id}/deregister-previous-devices",
+    "/api/v2/signin-links/{token}/code",
+    "/api/v2/signin-links/{token}/poll",
     "/api/v2/settings/test-b2",
     "/api/v2/settings/test-email",
     "/api/v2/sync/force-refresh-metadata",

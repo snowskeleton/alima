@@ -179,6 +179,42 @@ class AudibleAccount(Base):
     )
 
 
+class AudibleSigninLink(Base):
+    """A shareable link that lets someone sign an Audible account into Alima.
+
+    The person opening the link needs no Alima login. The page shows them an
+    Amazon device code (amazon.<tld>/code); once they confirm it, Alima registers
+    the device and either adds a new account or, when ``account_id`` is set,
+    re-authenticates that account. Links are single-use and expire.
+
+    Only a SHA-256 of the token is stored, so a database leak doesn't hand out
+    working links. A brand-new table needs no migration: ``init_db`` runs
+    ``create_all`` on startup, which creates missing tables.
+    """
+
+    __tablename__ = "audible_signin_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    account_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("audible_accounts.id", ondelete="CASCADE"), nullable=True
+    )
+    marketplace: Mapped[str] = mapped_column(String(10))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    result_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # The device code currently on offer. A code lasts minutes, the link days,
+    # so a person may go through several codes before confirming one.
+    device_serial: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    public_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    private_code: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    code_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    poll_interval_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    last_poll_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class Book(Base):
     """Book model."""
 

@@ -114,6 +114,7 @@ _PARAM_VALUES = {
     "filepath": "inventory-probe.jpg",
     "ext": "m4b",
     "full_path": "inventory-probe",
+    "token": "inventory-probe",  # unknown sign-in link token: a 404, never reaches Amazon
 }
 
 
