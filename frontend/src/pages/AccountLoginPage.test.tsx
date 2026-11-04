@@ -1,7 +1,9 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { http, HttpResponse } from 'msw';
 import { recordRequests } from '../test/record';
+import { server } from '../test/server';
 import { currentPath, renderWithProviders } from '../test/utils';
 import { AccountLoginPage } from './AccountLoginPage';
 
@@ -155,5 +157,66 @@ describe('AccountLoginPage', () => {
     await userEvent.click(await screen.findByRole('button', { name: /copy login url/i }));
 
     expect(writeText).toHaveBeenCalledWith('https://amazon.example/oauth');
+  });
+
+  describe('re-authenticating an existing account', () => {
+    function renderReauth(id = 7) {
+      server.use(http.get('/api/v2/accounts', () => HttpResponse.json({
+        accounts: [{
+          id: 7, username: 'reader@example.com', marketplace: 'DE', enabled: true,
+          downloads_enabled: true, needs_reauth: true, previous_devices: 0,
+          last_sync_timestamp: null, added_at: '2024-01-01T00:00:00',
+        }],
+      })));
+      return renderWithProviders(<AccountLoginPage />, {
+        route: `/admin/accounts/login?reauth=${id}`,
+        path: '/admin/accounts/login',
+      });
+    }
+
+    it('names the account and uses its marketplace instead of a picker', async () => {
+      renderReauth();
+
+      expect(await screen.findByRole('heading', { name: /re-authenticate reader@example.com/i })).toBeInTheDocument();
+      expect(screen.queryByLabelText(/marketplace/i)).not.toBeInTheDocument();
+      expect(screen.getByText('DE')).toBeInTheDocument();
+    });
+
+    it('posts the account id when generating the URL', async () => {
+      const calls = recordRequests('post', '/api/v2/accounts/login/generate-url', {
+        session_id: 'sess-r', oauth_url: 'https://amazon.example/oauth',
+      });
+
+      renderReauth();
+      await userEvent.click(await screen.findByRole('button', { name: /generate login url/i }));
+
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0].body).toEqual({ account_id: 7, with_username: false });
+    });
+
+    it('keeps its pending login separate from an add-account one', async () => {
+      localStorage.setItem(PENDING_KEY, JSON.stringify({ sessionId: 'add', oauthUrl: 'https://add.example' }));
+
+      renderReauth();
+
+      expect(await screen.findByRole('button', { name: /generate login url/i })).toBeInTheDocument();
+    });
+
+    it('returns to the accounts list after completing', async () => {
+      recordRequests('post', '/api/v2/accounts/login/generate-url', {
+        session_id: 'sess-r', oauth_url: 'https://amazon.example/oauth',
+      });
+      recordRequests('post', '/api/v2/accounts/login/complete', {
+        success: true, username: 'reader@example.com', reauthenticated: true, previous_devices: 1,
+      });
+
+      renderReauth();
+      await userEvent.click(await screen.findByRole('button', { name: /generate login url/i }));
+      await userEvent.type(await screen.findByPlaceholderText(/redirect url/i), 'https://amazon.example/done');
+      await userEvent.click(screen.getByRole('button', { name: /complete login/i }));
+
+      await waitFor(() => expect(currentPath()).toBe('/admin/accounts'));
+      expect(localStorage.getItem(`${PENDING_KEY}.reauth.7`)).toBeNull();
+    });
   });
 });

@@ -147,6 +147,12 @@ export interface AudibleAccount {
   marketplace: string;
   enabled: boolean;
   downloads_enabled: boolean;
+  /** The device was registered with Audible's outdated iPhone profile and
+   *  will be refused download licenses until it is re-authenticated. */
+  needs_reauth: boolean;
+  /** Devices this account was re-authenticated away from that are still
+   *  registered with Amazon. */
+  previous_devices: number;
   last_sync_timestamp: string | null;
   added_at: string;
 }

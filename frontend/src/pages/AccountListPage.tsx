@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAccounts, useAccountActions } from '../api/hooks/useAccounts';
 import { useForceRefreshMetadata } from '../api/hooks/useAdmin';
 import { apiFetch } from '../api/client';
@@ -10,6 +10,7 @@ import { Badge } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Alert } from '../components/ui/Alert';
 import { timeAgo } from '../utils/format';
+import type { AccountsNotice } from './AccountLoginPage';
 
 const MARKETPLACES = [
   { value: 'US', label: 'United States' },
@@ -26,7 +27,11 @@ const MARKETPLACES = [
 
 export function AccountListPage() {
   const { data, isLoading } = useAccounts();
-  const { patchAccount, deleteAccount, syncAccount, queueAll } = useAccountActions();
+  const { patchAccount, deleteAccount, syncAccount, queueAll, deregisterPreviousDevices } = useAccountActions();
+  const location = useLocation();
+  // Set by the login page after adding or re-authenticating an account.
+  const loginNotice = (location.state as { notice?: AccountsNotice } | null)?.notice;
+  const [deviceNotice, setDeviceNotice] = useState<AccountsNotice | null>(null);
   const forceRefresh = useForceRefreshMetadata();
   const qc = useQueryClient();
 
@@ -40,6 +45,33 @@ export function AccountListPage() {
   if (isLoading) return <PageSpinner />;
 
   const accounts = data?.accounts ?? [];
+  const staleCount = accounts.filter(a => a.needs_reauth).length;
+  const notice = deviceNotice ?? loginNotice;
+
+  const removeOldDevices = (id: number, username: string, count: number) => {
+    const what = count === 1 ? 'its old device' : `its ${count} old devices`;
+    if (!confirm(`Deregister ${what} for "${username}" from Amazon? Only do this once downloads work with the new device.`)) return;
+    setDeviceNotice(null);
+    deregisterPreviousDevices.mutate(id, {
+      onSuccess: (result) => {
+        if (result.failed.length === 0) {
+          setDeviceNotice({ type: 'success', message: `Removed the old device for ${username}.` });
+        } else {
+          setDeviceNotice({
+            type: 'warning',
+            message:
+              `Couldn't remove ${result.failed.length} old device(s) for ${username}: ` +
+              result.failed.map(f => `…${f.device}: ${f.error}`).join('; ') +
+              '. You can retry, or remove it from the Amazon account\'s Devices page.',
+          });
+        }
+      },
+      onError: (e) => setDeviceNotice({
+        type: 'warning',
+        message: e instanceof Error ? e.message : 'Removing the old device failed',
+      }),
+    });
+  };
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,6 +115,16 @@ export function AccountListPage() {
           </Link>
         </div>
       </div>
+
+      {notice && <Alert type={notice.type} className="mb-4">{notice.message}</Alert>}
+
+      {staleCount > 0 && (
+        <Alert type="warning" className="mb-4">
+          {staleCount === 1 ? '1 account was' : `${staleCount} accounts were`} registered with an
+          outdated device profile that Audible now refuses download licenses for. Use
+          “Re-authenticate” on each one marked below.
+        </Alert>
+      )}
 
       {/* Auth file upload form */}
       {showUpload && (
@@ -151,6 +193,7 @@ export function AccountListPage() {
                     <Badge>{account.marketplace.toUpperCase()}</Badge>
                     {account.enabled ? <Badge color="green">Enabled</Badge> : <Badge color="gray">Disabled</Badge>}
                     {account.downloads_enabled ? <Badge color="blue">Downloads On</Badge> : <Badge color="gray">Downloads Off</Badge>}
+                    {account.needs_reauth && <Badge color="yellow">Needs re-auth</Badge>}
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
                     Last synced: {timeAgo(account.last_sync_timestamp)}
@@ -159,6 +202,19 @@ export function AccountListPage() {
                 <div className="flex items-center gap-2 flex-wrap justify-end">
                   <Button variant="secondary" size="sm" onClick={() => syncAccount.mutate(account.id)} disabled={syncAccount.isPending}>Sync</Button>
                   <Button variant="secondary" size="sm" onClick={() => queueAll.mutate(account.id)}>Queue All</Button>
+                  <Link to={`/admin/accounts/login?reauth=${account.id}`}>
+                    <Button variant={account.needs_reauth ? 'primary' : 'ghost'} size="sm">Re-authenticate</Button>
+                  </Link>
+                  {account.previous_devices > 0 && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => removeOldDevices(account.id, account.username, account.previous_devices)}
+                      disabled={deregisterPreviousDevices.isPending}
+                    >
+                      Remove old device
+                    </Button>
+                  )}
                   <Button variant="ghost" size="sm" onClick={() => patchAccount.mutate({ id: account.id, data: { enabled: !account.enabled } })}>
                     {account.enabled ? 'Disable' : 'Enable'}
                   </Button>

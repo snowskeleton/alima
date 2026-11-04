@@ -9,6 +9,13 @@ export function useAccounts() {
   });
 }
 
+export interface DeregisterPreviousDevicesResult {
+  removed: number;
+  /** device: the last characters of the device serial. */
+  failed: { device: string; error: string }[];
+  previous_devices: number;
+}
+
 export function useAccountActions() {
   const qc = useQueryClient();
 
@@ -37,5 +44,14 @@ export function useAccountActions() {
       apiFetch(`/accounts/${id}/queue-all`, { method: 'POST' }),
   });
 
-  return { patchAccount, deleteAccount, syncAccount, queueAll };
+  const deregisterPreviousDevices = useMutation({
+    mutationFn: (id: number) =>
+      apiFetch<DeregisterPreviousDevicesResult>(
+        `/accounts/${id}/deregister-previous-devices`,
+        { method: 'POST' },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['accounts'] }),
+  });
+
+  return { patchAccount, deleteAccount, syncAccount, queueAll, deregisterPreviousDevices };
 }
