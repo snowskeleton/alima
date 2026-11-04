@@ -1102,6 +1102,18 @@ class BookDownloadService:
         if not account:
             raise ValueError(f"Audible account not found for book '{book.title}'")
 
+        # A manual request is an explicit retry. download_unavailable records a
+        # past license denial, and process_queue skips flagged books without
+        # contacting Audible, so leaving the flag set would fail this request
+        # with the old error. A denial that still holds sets it again.
+        if book.download_unavailable:
+            logger.info(
+                f"Clearing download_unavailable on book {book.asin} for a manual download"
+            )
+            book.download_unavailable = False
+            book.download_error_message = None
+            self.db.commit()
+
         # Check if already in queue
         existing_queue = (
             self.db.query(DownloadQueue)

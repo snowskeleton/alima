@@ -438,3 +438,56 @@ class TestManualRequeue:
         assert test_db.query(DownloadQueue).filter(
             DownloadQueue.book_id == book.id
         ).count() == 1
+
+
+class TestManualDownloadOfUnavailableBook:
+    """A past license denial must not silently fail a manual "download now".
+
+    process_queue skips books flagged download_unavailable and copies the old
+    error onto the entry without contacting Audible, so after re-authenticating
+    an account the user's clicks kept failing with the stale denial.
+    """
+
+    DENIAL = "License request denied (status: Denied): ... not eligible for AYCL"
+
+    def _flag(self, test_db, book):
+        book.download_unavailable = True
+        book.download_error_message = self.DENIAL
+        test_db.commit()
+
+    def test_manual_download_clears_the_flag_and_queues(self, test_db, book):
+        self._flag(test_db, book)
+
+        result = BookDownloadService(test_db).download_book_now(book.id)
+
+        test_db.refresh(book)
+        assert book.download_unavailable is False
+        assert book.download_error_message is None
+        entry = test_db.query(DownloadQueue).filter(DownloadQueue.id == result["queue_id"]).one()
+        assert entry.status == DownloadStatus.PENDING
+        assert entry.error_message is None
+
+    def test_manually_queued_entry_is_attempted_not_auto_failed(self, test_db, book, monkeypatch):
+        self._flag(test_db, book)
+        service = BookDownloadService(test_db)
+        attempted = []
+        monkeypatch.setattr(
+            service, "_download_book_thread_safe",
+            lambda queue_id: attempted.append(queue_id) or {"success": True},
+        )
+
+        result = service.download_book_now(book.id)
+        service.process_queue()
+
+        assert attempted == [result["queue_id"]]
+
+    def test_queue_still_skips_flagged_books_queued_automatically(self, test_db, book):
+        """The automatic path keeps skipping known-denied books."""
+        self._flag(test_db, book)
+        entry = _queue(test_db, book, DownloadStatus.PENDING, minutes_ago=1)
+
+        BookDownloadService(test_db).process_queue()
+
+        test_db.refresh(entry)
+        assert entry.status == DownloadStatus.FAILED
+        assert entry.error_message == self.DENIAL
